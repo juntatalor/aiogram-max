@@ -15,6 +15,7 @@ from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
 import httpx
+from aiogram.client.default import Default
 from aiogram.client.session.base import BaseSession
 from aiogram.client.telegram import TelegramAPIServer
 from aiogram.methods import (
@@ -218,9 +219,14 @@ class MaxSession(BaseSession):
             payload["attachments"] = [attachment]
 
         # Параметры, у которых в MAX есть прямой аналог.
-        if (fmt := converters.parse_mode_to_format(method.parse_mode)) is not None:
+        # parse_mode может прийти сентинелом Default — тогда реальное значение
+        # лежит в настройках бота, а не в самом методе.
+        parse_mode = method.parse_mode
+        if isinstance(parse_mode, Default):
+            parse_mode = bot.default.parse_mode
+        if (fmt := converters.parse_mode_to_format(parse_mode)) is not None:
             payload["format"] = fmt
-            if method.parse_mode == "MarkdownV2":
+            if parse_mode == "MarkdownV2":
                 self._degrade(
                     "parse_mode=MarkdownV2",
                     "у MAX CommonMark: экранирование MarkdownV2 отличается, "
@@ -264,9 +270,7 @@ class MaxSession(BaseSession):
         await self._request("DELETE", "/messages", params={"message_id": mid})
         return True
 
-    async def _answer_callback(
-        self, bot: Bot, method: AnswerCallbackQuery
-    ) -> bool:
+    async def _answer_callback(self, bot: Bot, method: AnswerCallbackQuery) -> bool:
         body: dict[str, Any] = {}
         if method.text:
             body["notification"] = method.text

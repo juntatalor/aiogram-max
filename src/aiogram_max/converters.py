@@ -81,9 +81,7 @@ def to_attachments(
         kind = att.get("type")
         if kind == "image" and "photo" not in fields:
             fields["photo"] = [
-                PhotoSize(
-                    file_id=url, file_unique_id=url, width=0, height=0
-                )
+                PhotoSize(file_id=url, file_unique_id=url, width=0, height=0)
             ]
         elif kind in {"file", "audio", "video"} and "document" not in fields:
             fields["document"] = Document(
@@ -125,11 +123,17 @@ def to_update(raw: dict[str, Any], update_id: int) -> Update | None:
     if kind == "message_callback":
         cb = raw["callback"]
         message = raw.get("message")
+        clicker = to_user(cb.get("user"))
+        if clicker is None:
+            # Кто нажал — обязательное поле CallbackQuery в aiogram, и без него
+            # событие всё равно некуда роутить. Пропускаем как неизвестный тип,
+            # а не падаем: иначе один кривой апдейт застопорит весь polling.
+            return None
         return Update(
             update_id=update_id,
             callback_query=CallbackQuery(
                 id=cb["callback_id"],
-                from_user=to_user(cb["user"]),
+                from_user=clicker,
                 # chat_instance в Telegram обязателен и используется только
                 # как ключ группировки; MAX аналога не имеет.
                 chat_instance=str(cb.get("callback_id")),
@@ -144,9 +148,7 @@ def to_update(raw: dict[str, Any], update_id: int) -> Update | None:
             update_id=update_id,
             message=Message(
                 message_id=0,
-                date=datetime.fromtimestamp(
-                    int(raw.get("timestamp", 0)) / 1000, tz=UTC
-                ),
+                date=datetime.fromtimestamp(int(raw.get("timestamp", 0)) / 1000, tz=UTC),
                 chat=Chat(id=int(raw.get("chat_id") or 0), type="private"),
                 from_user=to_user(raw.get("user")),
                 text="/start",

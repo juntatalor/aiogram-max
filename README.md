@@ -6,7 +6,7 @@
 from aiogram import Dispatcher
 from aiogram_max import make_bot
 
-bot = make_bot(max_token="...")      # единственная изменённая строка
+bot = make_bot(max_token="...")  # единственная изменённая строка
 await Dispatcher().start_polling(bot)
 ```
 
@@ -74,7 +74,7 @@ aiogram-`Update`.
 У MAX нет части возможностей Telegram. Политика задаётся при создании бота:
 
 ```python
-make_bot(token)                                        # WARN, по умолчанию
+make_bot(token)  # WARN, по умолчанию
 make_bot(token, unsupported=UnsupportedPolicy.STRICT)
 ```
 
@@ -125,9 +125,25 @@ make_bot(token, unsupported=UnsupportedPolicy.STRICT)
 * `bot.id` — заглушка `0`, настоящий id надо брать из `GET /me`.
 * Покрыты 7 методов из ~100 в Telegram Bot API; остальное — по мере надобности.
 
+## Установка
+
+```bash
+pip install aiogram-max      # после публикации; пока — pip install -e .
+```
+
+Python 3.12+, единственные зависимости — `aiogram` и `httpx`. Библиотека
+типизирована (`py.typed`), mypy strict проходит без ignore'ов.
+
 ## Разработка
 
 ```bash
 uv venv && uv pip install -e ".[dev]"
-.venv/bin/python -m pytest -q
+.venv/bin/ruff check . && .venv/bin/mypy && .venv/bin/pytest -q
 ```
+
+Как добавить метод и чем `NotImplementedYet` отличается от `UnsupportedByMax` —
+в [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## Лицензия
+
+MIT

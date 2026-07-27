@@ -9,7 +9,7 @@ from typing import Any
 
 import httpx
 import pytest
-from aiogram import Dispatcher, F, Router
+from aiogram import Bot, Dispatcher, F, Router
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -102,7 +102,7 @@ class FakeMax:
         return httpx.Response(200, json={})
 
 
-def make_test_bot(fake: FakeMax, **kwargs: Any):
+def make_test_bot(fake: FakeMax, **kwargs: Any) -> Bot:
     client = httpx.AsyncClient(transport=fake.transport())
     return make_bot("max-token", client=client, **kwargs)
 
@@ -164,7 +164,9 @@ async def test_dispatcher_routes_message_to_handler() -> None:
         {
             "type": "inline_keyboard",
             "payload": {
-                "buttons": [[{"type": "callback", "text": "Принять", "payload": "accept:42"}]]
+                "buttons": [
+                    [{"type": "callback", "text": "Принять", "payload": "accept:42"}]
+                ]
             },
         }
     ]
@@ -236,7 +238,9 @@ async def test_unsupported_method_raises_in_strict_mode() -> None:
     await bot.session.close()
 
 
-async def test_unsupported_method_is_skipped_by_default(caplog) -> None:
+async def test_unsupported_method_is_skipped_by_default(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     """По умолчанию вызов пропускается с предупреждением, бот живёт дальше."""
     fake = FakeMax()
     bot = make_test_bot(fake)
@@ -248,7 +252,9 @@ async def test_unsupported_method_is_skipped_by_default(caplog) -> None:
     await bot.session.close()
 
 
-async def test_dropped_button_warns_but_keeps_the_rest(caplog) -> None:
+async def test_dropped_button_warns_but_keeps_the_rest(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     """Кнопки без аналога в MAX выбрасываются — но не молча."""
     fake = FakeMax()
     bot = make_test_bot(fake)
@@ -393,7 +399,9 @@ async def test_file_attachment_is_downloadable() -> None:
     bot = make_test_bot(fake)
 
     updates = await bot.get_updates()
-    document = updates[0].message.document
+    message = updates[0].message
+    assert message is not None
+    document = message.document
     assert document is not None
     assert document.file_name == "posts.docx"
     assert document.file_size == 2048

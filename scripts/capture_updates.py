@@ -37,7 +37,7 @@ async def main(seconds: int) -> None:
     async with httpx.AsyncClient(timeout=40) as client:
         with OUT.open("a", encoding="utf-8") as fh:
             while time.monotonic() < deadline:
-                params: dict[str, object] = {"timeout": 20, "limit": 50}
+                params: dict[str, str | int] = {"timeout": 20, "limit": 50}
                 if marker is not None:
                     params["marker"] = marker
                 response = await client.get(

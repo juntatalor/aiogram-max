@@ -54,9 +54,7 @@ async def create_bot(
     Один лишний запрос на старте — зато ``bot.id`` не ноль, а username
     доезжает до фильтра ``Command``, который разбирает ``/start@bot``.
     """
-    probe = make_bot(
-        max_token, api_url=api_url, unsupported=unsupported, client=client
-    )
+    probe = make_bot(max_token, api_url=api_url, unsupported=unsupported, client=client)
     try:
         me = await probe.get_me()
     finally:
