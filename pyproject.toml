@@ -1,0 +1,26 @@
+[project]
+name = "aiogram-max"
+version = "0.0.1"
+description = "Запускает aiogram-бота в мессенджере MAX: подменяем сессию, код бота не трогаем"
+requires-python = ">=3.12"
+dependencies = [
+    "aiogram>=3.20",
+    "httpx>=0.27",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+    "pytest-asyncio>=0.24",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/aiogram_max"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
