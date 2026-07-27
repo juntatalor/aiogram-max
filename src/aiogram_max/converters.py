@@ -18,8 +18,10 @@ from typing import Any
 from aiogram.types import (
     CallbackQuery,
     Chat,
+    Document,
     InlineKeyboardMarkup,
     Message,
+    PhotoSize,
     Update,
     User,
 )
@@ -58,6 +60,38 @@ def to_chat(recipient: dict[str, Any], sender: dict[str, Any] | None) -> Chat:
     return Chat(id=int(cid or 0), type=chat_type(recipient.get("chat_type")))
 
 
+def to_attachments(
+    raw_attachments: list[dict[str, Any]] | None,
+) -> dict[str, Any]:
+    """MAX attachments → поля aiogram Message (document / photo).
+
+    У MAX нет file_id и метода getFile: вложение приходит готовым URL внутри
+    payload. Кладём этот URL в ``file_id`` — сессия отдаёт его обратно как
+    ``file_path``, и ``bot.download`` скачивает по прямой ссылке.
+    """
+    fields: dict[str, Any] = {}
+    for att in raw_attachments or []:
+        payload = att.get("payload") or {}
+        url = payload.get("url")
+        if not url:
+            continue
+        kind = att.get("type")
+        if kind == "image" and "photo" not in fields:
+            fields["photo"] = [
+                PhotoSize(
+                    file_id=url, file_unique_id=url, width=0, height=0
+                )
+            ]
+        elif kind in {"file", "audio", "video"} and "document" not in fields:
+            fields["document"] = Document(
+                file_id=url,
+                file_unique_id=url,
+                file_name=att.get("filename"),
+                file_size=att.get("size"),
+            )
+    return fields
+
+
 def to_message(raw: dict[str, Any]) -> Message:
     """MAX message → aiogram Message.
 
@@ -74,6 +108,7 @@ def to_message(raw: dict[str, Any]) -> Message:
         chat=to_chat(recipient, sender),
         from_user=to_user(sender),
         text=body.get("text"),
+        **to_attachments(body.get("attachments")),
     )
 
 

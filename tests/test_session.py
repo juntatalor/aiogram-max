@@ -93,6 +93,8 @@ class FakeMax:
                     }
                 },
             )
+        if request.url.host == "files.max.ru":
+            return httpx.Response(200, content=b"docx-bytes")
         if request.url.path == "/me":
             return httpx.Response(
                 200, json={"user_id": 1, "first_name": "pocherk", "is_bot": True}
@@ -354,4 +356,50 @@ async def test_get_me_returns_aiogram_user() -> None:
 
     assert me.id == 1
     assert me.is_bot is True
+    await bot.session.close()
+
+
+MESSAGE_WITH_FILE = {
+    "update_type": "message_created",
+    "timestamp": 1769500003000,
+    "message": {
+        "sender": {"user_id": 777, "first_name": "Сергей", "is_bot": False},
+        "recipient": {"chat_id": 42, "chat_type": "dialog"},
+        "timestamp": 1769500003000,
+        "body": {
+            "mid": "mid-file",
+            "seq": 13,
+            "text": "вот примеры постов",
+            "attachments": [
+                {
+                    "type": "file",
+                    "filename": "posts.docx",
+                    "size": 2048,
+                    "payload": {"url": "https://files.max.ru/posts.docx", "token": "t"},
+                }
+            ],
+        },
+    },
+}
+
+
+async def test_file_attachment_is_downloadable() -> None:
+    """У MAX нет file_id и getFile — ссылка приходит с сообщением.
+
+    Проверяем весь путь: вложение доехало до aiogram Document, bot.download
+    сходил по прямой ссылке MAX и вернул содержимое.
+    """
+    fake = FakeMax([MESSAGE_WITH_FILE])
+    bot = make_test_bot(fake)
+
+    updates = await bot.get_updates()
+    document = updates[0].message.document
+    assert document is not None
+    assert document.file_name == "posts.docx"
+    assert document.file_size == 2048
+
+    buffer = await bot.download(document)
+    assert buffer is not None
+    assert buffer.read() == b"docx-bytes"
+    assert ("GET", "/posts.docx", None) in fake.requests
     await bot.session.close()

@@ -16,20 +16,22 @@ from typing import TYPE_CHECKING, Any
 
 import httpx
 from aiogram.client.session.base import BaseSession
+from aiogram.client.telegram import TelegramAPIServer
 from aiogram.methods import (
     AnswerCallbackQuery,
     DeleteMessage,
     EditMessageText,
+    GetFile,
     GetMe,
     GetUpdates,
     SendChatAction,
     SendMessage,
     TelegramMethod,
 )
-from aiogram.types import Update, User
+from aiogram.types import File, Update, User
 
 from aiogram_max import converters
-from aiogram_max.errors import MaxApiError, UnsupportedByMax
+from aiogram_max.errors import MaxApiError, NotImplementedYet, UnsupportedByMax
 
 if TYPE_CHECKING:
     from aiogram import Bot
@@ -37,6 +39,23 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 MAX_API_URL = "https://platform-api.max.ru"
+
+# Методы, у которых в MAX аналог есть, а у нас руки не дошли. Отличаются от
+# UnsupportedByMax тем, что чинятся патчем, а не свойствами платформы.
+NOT_IMPLEMENTED_PR_WELCOME: dict[str, str] = {
+    "SendPhoto": "MAX: POST /uploads (type=image) + attachment type=image",
+    "SendVideo": "MAX: POST /uploads (type=video) + attachment type=video",
+    "SendAudio": "MAX: POST /uploads (type=audio) + attachment type=audio",
+    "SendMediaGroup": "MAX: несколько attachments в одном POST /messages",
+    "PinChatMessage": "MAX: POST /chats/{chat_id}/pin",
+    "UnpinChatMessage": "MAX: DELETE /chats/{chat_id}/pin",
+    "GetChat": "MAX: GET /chats/{chat_id}",
+    "LeaveChat": "MAX: DELETE /chats/{chat_id}/members/me",
+    "GetChatAdministrators": "MAX: GET /chats/{chat_id}/admins",
+    "SetMyCommands": "MAX: PATCH /me с полем commands",
+    "SetWebhook": "MAX: POST /subscriptions",
+    "GetWebhookInfo": "MAX: GET /subscriptions",
+}
 
 
 class UnsupportedPolicy(StrEnum):
@@ -68,7 +87,12 @@ class MaxSession(BaseSession):
         unsupported: UnsupportedPolicy = UnsupportedPolicy.WARN,
         client: httpx.AsyncClient | None = None,
     ) -> None:
-        super().__init__()
+        # file="{path}" — ключевой момент для скачивания вложений. aiogram
+        # строит ссылку на файл как api.file_url(token, file_path); у MAX
+        # вложение уже приходит готовым URL, и шаблон отдаёт его как есть.
+        super().__init__(
+            api=TelegramAPIServer(base=f"{api_url}/{{method}}", file="{path}")
+        )
         self._token = token
         self._api_url = api_url.rstrip("/")
         self._unsupported = unsupported
@@ -89,10 +113,13 @@ class MaxSession(BaseSession):
         method: TelegramMethod[Any],
         timeout: int | None = None,
     ) -> Any:
+        name = type(method).__name__
         handler = _HANDLERS.get(type(method))
-        if handler is None:
-            return self._reject(type(method).__name__)
-        return await handler(self, bot, method)
+        if handler is not None:
+            return await handler(self, bot, method)
+        if name in NOT_IMPLEMENTED_PR_WELCOME:
+            raise NotImplementedYet(name, NOT_IMPLEMENTED_PR_WELCOME[name])
+        return self._reject(name)
 
     async def stream_content(
         self,
@@ -251,6 +278,18 @@ class MaxSession(BaseSession):
         )
         return True
 
+    async def _get_file(self, bot: Bot, method: GetFile) -> File:
+        """У MAX нет getFile: ссылка на вложение приходит вместе с сообщением.
+
+        Конвертер кладёт её в ``file_id``, здесь просто возвращаем её же как
+        ``file_path`` — дальше aiogram скачает через ``stream_content``.
+        """
+        return File(
+            file_id=method.file_id,
+            file_unique_id=method.file_id,
+            file_path=method.file_id,
+        )
+
     async def _get_me(self, bot: Bot, method: GetMe) -> User:
         data = await self._request("GET", "/me")
         user = converters.to_user({**data, "is_bot": True})
@@ -282,6 +321,7 @@ _HANDLERS: dict[type[TelegramMethod[Any]], Any] = {
     EditMessageText: MaxSession._edit_message_text,
     DeleteMessage: MaxSession._delete_message,
     AnswerCallbackQuery: MaxSession._answer_callback,
+    GetFile: MaxSession._get_file,
     GetMe: MaxSession._get_me,
     SendChatAction: MaxSession._send_chat_action,
 }

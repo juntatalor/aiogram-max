@@ -6,16 +6,31 @@ class AiogramMaxError(Exception):
 
 
 class UnsupportedByMax(AiogramMaxError):
-    """Метод Telegram Bot API не имеет аналога в MAX.
+    """У метода Telegram нет аналога в MAX — и не появится с нашей стороны.
 
-    Поднимается в строгом режиме. В мягком — метод логируется и превращается
-    в no-op: см. ``UnsupportedPolicy``.
+    Поднимается в строгом режиме. В режиме WARN метод логируется и
+    превращается в no-op: см. ``UnsupportedPolicy``.
     """
 
     def __init__(self, method_name: str) -> None:
         super().__init__(
             f"{method_name} не поддерживается MAX Bot API. "
-            "Уберите вызов или переключите MaxSession в режим LENIENT."
+            "Уберите вызов или переключите MaxSession в режим WARN."
+        )
+        self.method_name = method_name
+
+
+class NotImplementedYet(AiogramMaxError):
+    """Аналог в MAX есть, но мы его ещё не написали.
+
+    Отличать это от ``UnsupportedByMax`` важно: первое — предложение прислать
+    PR, второе — свойство самой платформы, и PR тут не поможет.
+    """
+
+    def __init__(self, method_name: str, hint: str = "") -> None:
+        super().__init__(
+            f"{method_name}: в MAX аналог есть, в aiogram-max ещё не написан. "
+            f"PR welcome! {hint}".strip()
         )
         self.method_name = method_name
 
