@@ -17,7 +17,7 @@ def make_bot(
     max_token: str,
     *,
     api_url: str = MAX_API_URL,
-    unsupported: UnsupportedPolicy = UnsupportedPolicy.STRICT,
+    unsupported: UnsupportedPolicy = UnsupportedPolicy.WARN,
     client: httpx.AsyncClient | None = None,
     **bot_kwargs: object,
 ) -> Bot:

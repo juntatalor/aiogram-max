@@ -19,6 +19,7 @@ from aiogram.types import (
     InlineKeyboardButton,
     InlineKeyboardMarkup,
     Message,
+    WebAppInfo,
 )
 
 from aiogram_max import UnsupportedByMax, UnsupportedPolicy, make_bot
@@ -222,9 +223,9 @@ async def test_fsm_state_survives_platform_swap() -> None:
 
 
 async def test_unsupported_method_raises_in_strict_mode() -> None:
-    """Метода нет у MAX — падаем громко и по имени."""
+    """Метода нет у MAX — в строгом режиме падаем громко и по имени."""
     fake = FakeMax()
-    bot = make_test_bot(fake)
+    bot = make_test_bot(fake, unsupported=UnsupportedPolicy.STRICT)
 
     with pytest.raises(UnsupportedByMax) as exc:
         await bot(SendPoll(chat_id=42, question="?", options=["a", "b"]))
@@ -233,19 +234,98 @@ async def test_unsupported_method_raises_in_strict_mode() -> None:
     await bot.session.close()
 
 
-async def test_unsupported_method_is_skipped_in_lenient_mode() -> None:
-    """В мягком режиме вызов пропускается, бот живёт дальше."""
+async def test_unsupported_method_is_skipped_by_default(caplog) -> None:
+    """По умолчанию вызов пропускается с предупреждением, бот живёт дальше."""
     fake = FakeMax()
-    bot = make_test_bot(fake, unsupported=UnsupportedPolicy.LENIENT)
+    bot = make_test_bot(fake)
 
-    assert await bot(SendPoll(chat_id=42, question="?", options=["a", "b"])) is None
+    with caplog.at_level("WARNING"):
+        assert await bot(SendPoll(chat_id=42, question="?", options=["a", "b"])) is None
+
+    assert "SendPoll" in caplog.text
+    await bot.session.close()
+
+
+async def test_dropped_button_warns_but_keeps_the_rest(caplog) -> None:
+    """Кнопки без аналога в MAX выбрасываются — но не молча."""
+    fake = FakeMax()
+    bot = make_test_bot(fake)
+
+    with caplog.at_level("WARNING"):
+        await bot.send_message(
+            chat_id=42,
+            text="меню",
+            reply_markup=InlineKeyboardMarkup(
+                inline_keyboard=[
+                    [
+                        InlineKeyboardButton(text="Ок", callback_data="ok"),
+                        InlineKeyboardButton(
+                            text="Мини-апп", web_app=WebAppInfo(url="https://e.com")
+                        ),
+                    ]
+                ]
+            ),
+        )
+
+    assert "web_app" in caplog.text
+    assert "Мини-апп" in caplog.text
+    body = next(r[2] for r in fake.requests if r[1] == "/messages")
+    assert body is not None
+    buttons = body["attachments"][0]["payload"]["buttons"]
+    assert buttons == [[{"type": "callback", "text": "Ок", "payload": "ok"}]]
+    await bot.session.close()
+
+
+async def test_dropped_button_raises_in_strict_mode() -> None:
+    """В строгом режиме потеря кнопки — ошибка, а не предупреждение."""
+    fake = FakeMax()
+    bot = make_test_bot(fake, unsupported=UnsupportedPolicy.STRICT)
+
+    with pytest.raises(UnsupportedByMax) as exc:
+        await bot.send_message(
+            chat_id=42,
+            text="меню",
+            reply_markup=InlineKeyboardMarkup(
+                inline_keyboard=[
+                    [
+                        InlineKeyboardButton(
+                            text="Мини-апп", web_app=WebAppInfo(url="https://e.com")
+                        )
+                    ]
+                ]
+            ),
+        )
+
+    assert "web_app" in str(exc.value)
+    await bot.session.close()
+
+
+async def test_supported_params_are_mapped_not_dropped() -> None:
+    """parse_mode, disable_notification и reply переводятся в поля MAX."""
+    fake = FakeMax([MESSAGE_CREATED])
+    bot = make_test_bot(fake)
+
+    await bot.get_updates()  # запомнили seq=11 → mid-abc
+    await bot.send_message(
+        chat_id=42,
+        text="<b>жирный</b>",
+        parse_mode="HTML",
+        disable_notification=True,
+        reply_to_message_id=11,
+    )
+
+    body = next(r[2] for r in fake.requests if r[1] == "/messages")
+    assert body is not None
+    assert body["format"] == "html"
+    assert body["notify"] is False
+    assert body["link"] == {"type": "reply", "mid": "mid-abc"}
     await bot.session.close()
 
 
 async def test_typing_indicator_is_silent_noop() -> None:
     """У MAX нет typing — но это не повод ронять бота даже в строгом режиме."""
     fake = FakeMax()
-    bot = make_test_bot(fake)
+    bot = make_test_bot(fake, unsupported=UnsupportedPolicy.STRICT)
 
     assert await bot.send_chat_action(chat_id=42, action="typing") is True
     assert fake.requests == []

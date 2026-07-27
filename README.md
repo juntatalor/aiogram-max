@@ -63,18 +63,37 @@ aiogram-`Update`.
 | Родной `Dispatcher.start_polling` | `test_native_polling_loop_delivers_max_events` |
 | Правка сообщения (`seq` ↔ `mid`) | `test_edit_message_uses_max_mid` |
 | Неподдерживаемый метод | `test_unsupported_method_raises_in_strict_mode` |
+| Потеря кнопки без аналога | `test_dropped_button_warns_but_keeps_the_rest` |
+| Маппинг parse_mode / notify / reply | `test_supported_params_are_mapped_not_dropped` |
 
 ## Неподдерживаемое в MAX
 
 У MAX нет части возможностей Telegram. Политика задаётся при создании бота:
 
 ```python
-make_bot(token, unsupported=UnsupportedPolicy.STRICT)   # по умолчанию
-make_bot(token, unsupported=UnsupportedPolicy.LENIENT)
+make_bot(token)                                        # WARN, по умолчанию
+make_bot(token, unsupported=UnsupportedPolicy.STRICT)
 ```
 
-* `STRICT` — `UnsupportedByMax` с именем метода. Расхождение видно сразу.
-* `LENIENT` — предупреждение в лог, вызов пропускается.
+Расхождения бывают трёх видов:
+
+1. **Метода нет вовсе** (`SendPoll`, `SendDice`). `WARN` — предупреждение и
+   пропуск, `STRICT` — `UnsupportedByMax` с именем метода.
+2. **Метод есть, а параметра нет** (кнопка `web_app`, `switch_inline_query`).
+   Такая кнопка выбрасывается, остальные остаются: `WARN` пишет в лог что
+   именно потерялось, `STRICT` падает. Молча не выбрасываем никогда —
+   «кнопка исчезла, а бот не упал» ищется потом часами.
+3. **Семантика другая** — это работа слоя конвертации, а не политики:
+   `message_id` (int) ↔ MAX `mid` (str) сшиваются через `seq`.
+
+Где аналог есть — параметр переводится, а не теряется:
+
+| aiogram | MAX |
+| --- | --- |
+| `parse_mode="HTML"` | `format: html` |
+| `parse_mode="MarkdownV2"` | `format: markdown` + предупреждение (у MAX CommonMark) |
+| `disable_notification=True` | `notify: false` |
+| `reply_to_message_id` | `link: {type: reply, mid}` |
 
 Отдельный случай — `SendChatAction`: у MAX нет typing-индикатора, и это
 тихий no-op даже в строгом режиме. Индикатор набора не меняет смысла диалога,

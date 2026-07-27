@@ -40,13 +40,21 @@ MAX_API_URL = "https://platform-api.max.ru"
 
 
 class UnsupportedPolicy(StrEnum):
-    """Что делать с методом Telegram, которого нет в MAX."""
+    """Что делать с тем, чего в MAX нет.
+
+    Расхождения бывают трёх видов, и политика покрывает первые два:
+
+    1. Метода нет вовсе (``SendPoll``) — ``_reject``.
+    2. Метод есть, а параметра нет (кнопка ``web_app``) — ``_degrade``.
+    3. Семантика другая (``message_id`` против строкового ``mid``) — это
+       не расхождение, а работа слоя конвертации, политики не касается.
+    """
+
+    WARN = "warn"
+    """Предупреждение в лог, вызов продолжается урезанным. По умолчанию."""
 
     STRICT = "strict"
-    """Поднять UnsupportedByMax. Дефолт: расхождение видно сразу."""
-
-    LENIENT = "lenient"
-    """Залоггировать и вернуть None. Бот продолжает работать урезанным."""
+    """Поднять UnsupportedByMax. Включается явно при создании бота."""
 
 
 class MaxSession(BaseSession):
@@ -57,7 +65,7 @@ class MaxSession(BaseSession):
         token: str,
         *,
         api_url: str = MAX_API_URL,
-        unsupported: UnsupportedPolicy = UnsupportedPolicy.STRICT,
+        unsupported: UnsupportedPolicy = UnsupportedPolicy.WARN,
         client: httpx.AsyncClient | None = None,
     ) -> None:
         super().__init__()
@@ -131,10 +139,21 @@ class MaxSession(BaseSession):
         return data
 
     def _reject(self, method_name: str) -> None:
+        """Метода нет в MAX целиком."""
         if self._unsupported is UnsupportedPolicy.STRICT:
             raise UnsupportedByMax(method_name)
         logger.warning("%s не поддерживается MAX — вызов пропущен", method_name)
         return None
+
+    def _degrade(self, what: str, detail: str) -> None:
+        """Метод отработает, но часть запрошенного потерялась.
+
+        Молча выбрасывать нельзя: «кнопка исчезла, а бот не упал» — ровно
+        тот баг, который потом ищут часами.
+        """
+        if self._unsupported is UnsupportedPolicy.STRICT:
+            raise UnsupportedByMax(f"{what} ({detail})")
+        logger.warning("%s не поддерживается MAX и отброшен: %s", what, detail)
 
     # --- Трансляция методов --------------------------------------------
 
@@ -163,11 +182,34 @@ class MaxSession(BaseSession):
 
     async def _send_message(self, bot: Bot, method: SendMessage) -> Any:
         payload: dict[str, Any] = {"text": method.text}
+
         attachment = converters.keyboard_to_attachment(
-            method.reply_markup  # type: ignore[arg-type]
+            method.reply_markup,  # type: ignore[arg-type]
+            degrade=self._degrade,
         )
         if attachment:
             payload["attachments"] = [attachment]
+
+        # Параметры, у которых в MAX есть прямой аналог.
+        if (fmt := converters.parse_mode_to_format(method.parse_mode)) is not None:
+            payload["format"] = fmt
+            if method.parse_mode == "MarkdownV2":
+                self._degrade(
+                    "parse_mode=MarkdownV2",
+                    "у MAX CommonMark: экранирование MarkdownV2 отличается, "
+                    "отправлено как markdown",
+                )
+        if method.disable_notification is not None:
+            payload["notify"] = not method.disable_notification
+        if method.reply_to_message_id is not None:
+            mid = self._mid_by_seq.get(int(method.reply_to_message_id))
+            if mid is None:
+                self._degrade(
+                    "reply_to_message_id",
+                    f"неизвестный message_id={method.reply_to_message_id}",
+                )
+            else:
+                payload["link"] = {"type": "reply", "mid": mid}
 
         data = await self._request(
             "POST",

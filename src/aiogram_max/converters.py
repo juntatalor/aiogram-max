@@ -11,6 +11,7 @@
 * callback: {timestamp, callback_id, payload, user}
 """
 
+from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
 
@@ -117,12 +118,27 @@ def to_update(raw: dict[str, Any], update_id: int) -> Update | None:
     return None
 
 
-def keyboard_to_attachment(markup: InlineKeyboardMarkup | None) -> dict[str, Any] | None:
+# Telegram HTML/Markdown → MAX format. MarkdownV2 у MAX аналога не имеет,
+# ближайшее — markdown (CommonMark), о расхождении предупреждает вызывающий.
+_PARSE_MODE = {"HTML": "html", "Markdown": "markdown", "MarkdownV2": "markdown"}
+
+
+def parse_mode_to_format(parse_mode: str | None) -> str | None:
+    """aiogram parse_mode → MAX format."""
+    if parse_mode is None:
+        return None
+    return _PARSE_MODE.get(str(parse_mode))
+
+
+def keyboard_to_attachment(
+    markup: InlineKeyboardMarkup | None,
+    degrade: Callable[[str, str], None] | None = None,
+) -> dict[str, Any] | None:
     """aiogram InlineKeyboardMarkup → MAX attachment inline_keyboard.
 
-    Поддерживаем только callback-кнопки и ссылки: у MAX нет switch_inline,
-    web_app и прочего телеграмного. Неподдерживаемые кнопки отбрасываем —
-    показать пользователю кнопку, которая ничего не делает, хуже.
+    MAX знает только callback-кнопки и ссылки. Кнопку, которой нет аналога,
+    отбрасываем — показать пользователю кнопку, которая ничего не делает,
+    хуже. Но не молча: сообщаем через ``degrade``.
     """
     if markup is None:
         return None
@@ -136,6 +152,24 @@ def keyboard_to_attachment(markup: InlineKeyboardMarkup | None) -> dict[str, Any
                 )
             elif btn.url is not None:
                 buttons.append({"type": "link", "text": btn.text, "url": btn.url})
+            elif degrade is not None:
+                kind = next(
+                    (
+                        name
+                        for name in (
+                            "web_app",
+                            "login_url",
+                            "switch_inline_query",
+                            "switch_inline_query_current_chat",
+                            "callback_game",
+                            "pay",
+                            "copy_text",
+                        )
+                        if getattr(btn, name, None) is not None
+                    ),
+                    "кнопка неизвестного типа",
+                )
+                degrade(f"InlineKeyboardButton.{kind}", f"текст кнопки: {btn.text!r}")
         if buttons:
             rows.append(buttons)
     if not rows:
