@@ -1,0 +1,95 @@
+{
+  "message_created": {
+    "message": {
+      "recipient": {
+        "chat_id": 472107880,
+        "chat_type": "dialog",
+        "user_id": 277639678
+      },
+      "timestamp": 1785182044286,
+      "body": {
+        "mid": "mid.000000001c23cb68019fa524407e751a",
+        "seq": 116993690454357274,
+        "text": "Тест"
+      },
+      "sender": {
+        "user_id": 212843158,
+        "first_name": "Тестовый Юзер",
+        "last_name": "",
+        "is_bot": false,
+        "last_activity_time": 1785182036000,
+        "name": "Тестовый Юзер"
+      }
+    },
+    "timestamp": 1785182044286,
+    "user_locale": "ru",
+    "update_type": "message_created"
+  },
+  "message_callback": {
+    "callback": {
+      "timestamp": 1785182382767,
+      "callback_id": "cb-live-1",
+      "user": {
+        "user_id": 212843158,
+        "first_name": "Тестовый Юзер",
+        "last_name": "",
+        "is_bot": false,
+        "last_activity_time": 1785182380000,
+        "name": "Тестовый Юзер"
+      },
+      "payload": "accept:1"
+    },
+    "message": {
+      "recipient": {
+        "chat_id": 472107880,
+        "chat_type": "dialog",
+        "user_id": 212843158
+      },
+      "timestamp": 1785182163735,
+      "body": {
+        "mid": "mid.000000001c23cb68019fa52613170d20",
+        "seq": 116993698282540320,
+        "text": "Тест aiogram-max. Нажми любую кнопку — ловлю message_callback.",
+        "attachments": [
+          {
+            "payload": {
+              "buttons": [
+                [
+                  {
+                    "payload": "accept:1",
+                    "text": "✅ Принять",
+                    "type": "callback"
+                  },
+                  {
+                    "payload": "edit:1",
+                    "text": "✏️ Доработать",
+                    "type": "callback"
+                  }
+                ],
+                [
+                  {
+                    "url": "https://max.ru",
+                    "text": "Ссылка",
+                    "type": "link"
+                  }
+                ]
+              ]
+            },
+            "type": "inline_keyboard"
+          }
+        ]
+      },
+      "sender": {
+        "user_id": 277639678,
+        "first_name": "Тестовый Бот",
+        "username": "test_bot",
+        "is_bot": true,
+        "last_activity_time": 1785182382912,
+        "name": "Тестовый Бот"
+      }
+    },
+    "timestamp": 1785182382767,
+    "user_locale": "ru",
+    "update_type": "message_callback"
+  }
+}

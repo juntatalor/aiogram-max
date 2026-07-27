@@ -51,11 +51,14 @@ def to_user(raw: dict[str, Any] | None) -> User | None:
 def to_chat(recipient: dict[str, Any], sender: dict[str, Any] | None) -> Chat:
     """MAX recipient → aiogram Chat.
 
-    В диалоге MAX может не прислать chat_id — тогда чатом считаем самого
-    пользователя, как это делает Telegram в private-чате.
+    ``recipient.user_id`` в запасной путь НЕ годится: на живых событиях видно,
+    что это получатель конкретного сообщения, а не собеседник. В сообщении от
+    юзера боту там лежит id бота, в сообщении бота юзеру — id юзера. Если
+    подставить его как chat_id, бот в какой-то момент начнёт отвечать сам
+    себе, причём молча. Поэтому запасной путь только через отправителя.
     """
-    cid = recipient.get("chat_id") or recipient.get("user_id")
-    if cid is None and sender:
+    cid = recipient.get("chat_id")
+    if cid is None and sender and not sender.get("is_bot"):
         cid = sender.get("user_id")
     return Chat(id=int(cid or 0), type=chat_type(recipient.get("chat_type")))
 
