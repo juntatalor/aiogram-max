@@ -26,6 +26,7 @@ from aiogram.methods import (
     DeleteMyCommands,
     DeleteWebhook,
     EditMessageCaption,
+    EditMessageMedia,
     EditMessageReplyMarkup,
     EditMessageText,
     ForwardMessage,
@@ -53,6 +54,7 @@ from aiogram.methods import (
     SendVideo,
     SendVoice,
     SetChatDescription,
+    SetChatPhoto,
     SetChatTitle,
     SetMyCommands,
     SetWebhook,
@@ -114,8 +116,6 @@ CHAT_ACTIONS: dict[str, str] = {
 # Методы, у которых в MAX аналог есть, а у нас руки не дошли. Отличаются от
 # UnsupportedByMax тем, что чинятся патчем, а не свойствами платформы.
 NOT_IMPLEMENTED_PR_WELCOME: dict[str, str] = {
-    "SetChatPhoto": "MAX: PATCH /chats/{chat_id} с загруженной иконкой",
-    "EditMessageMedia": "MAX: PUT /messages с attachments",
     # Бот
     # Чаты
     # Участники
@@ -640,6 +640,58 @@ class MaxSession(BaseSession):
         await self._request("PUT", "/messages", params={"message_id": mid}, json=body)
         return True
 
+    async def _edit_media(self, bot: Bot, method: EditMessageMedia) -> bool:
+        """Заменить вложение у отправленного сообщения.
+
+        Новый файл заливается заново: ссылок на старое вложение MAX не даёт,
+        да и смысла переиспользовать их нет. Подпись, если она задана,
+        едет тем же запросом — у MAX это просто текст сообщения.
+        """
+        mid = self._mid_by_seq.get(int(method.message_id or 0))
+        if mid is None:
+            raise MaxApiError(0, f"неизвестный message_id={method.message_id}")
+
+        media = method.media
+        kind = {
+            "photo": "image",
+            "video": "video",
+            "audio": "audio",
+            "document": "file",
+        }.get(media.type)
+        if kind is None:
+            self._degrade(f"media {media.type}", "нет аналога в MAX")
+            return True
+
+        attachment = await self._upload_attachment(bot, kind, media.media)
+        body: dict[str, Any] = {"attachments": [attachment]}
+        caption = getattr(media, "caption", None)
+        if caption:
+            text, fmt = self._render_markup(
+                bot, caption, getattr(media, "parse_mode", None), None
+            )
+            body["text"] = text
+            if fmt is not None:
+                body["format"] = fmt
+        await self._request("PUT", "/messages", params={"message_id": mid}, json=body)
+        return True
+
+    async def _set_chat_photo(self, bot: Bot, method: SetChatPhoto) -> bool:
+        """Иконка чата: заливаем картинку и подставляем токен в PATCH.
+
+        Ссылку вместо токена MAX не принимает — отвечает internal.error.
+        """
+        attachment = await self._upload_attachment(bot, "image", method.photo)
+        token = attachment.get("payload", {}).get("token")
+        if not token:
+            self._degrade(
+                "SetChatPhoto по ссылке", "MAX принимает только загруженный файл"
+            )
+            return True
+        await self._request(
+            "PATCH", f"/chats/{method.chat_id}", json={"icon": {"token": token}}
+        )
+        return True
+
     async def _send_sticker(self, bot: Bot, method: SendSticker) -> Any:
         """Стикеры MAX опознаёт по своему коду, телеграмный file_id ему чужой.
 
@@ -928,4 +980,6 @@ _HANDLERS: dict[type[TelegramMethod[Any]], Any] = {
     ForwardMessage: MaxSession._forward_message,
     EditMessageCaption: MaxSession._edit_caption,
     SendSticker: MaxSession._send_sticker,
+    EditMessageMedia: MaxSession._edit_media,
+    SetChatPhoto: MaxSession._set_chat_photo,
 }

@@ -10,7 +10,7 @@ from typing import Any
 import httpx
 import pytest
 from aiogram import Bot
-from aiogram.types import ChatMemberMember, ChatMemberOwner
+from aiogram.types import BufferedInputFile, ChatMemberMember, ChatMemberOwner
 
 from aiogram_max import (
     MaxApiError,
@@ -62,7 +62,10 @@ class FakeChats:
     def _handle(self, request: httpx.Request) -> httpx.Response:
         import json
 
-        body = json.loads(request.content) if request.content else None
+        try:
+            body = json.loads(request.content) if request.content else None
+        except json.JSONDecodeError:
+            body = None  # multipart-заливка
         path = request.url.path
         self.requests.append((request.method, path, body))
 
@@ -83,6 +86,10 @@ class FakeChats:
             return httpx.Response(200, json=BOT_MEMBER)
         if path == f"/chats/{GROUP}/members":
             return httpx.Response(200, json={"members": [BOT_MEMBER, HUMAN_OWNER]})
+        if path == "/uploads":
+            return httpx.Response(200, json={"url": "https://up.max.test/image"})
+        if request.url.host == "up.max.test":
+            return httpx.Response(200, json={"photos": {"k": {"token": "img-token"}}})
         if path == f"/chats/{GROUP}/pin":
             return httpx.Response(200, json={})
         return httpx.Response(200, json={})
@@ -236,4 +243,22 @@ async def test_ban_removes_member_from_chat() -> None:
     await bot.ban_chat_member(GROUP, 134510822)
 
     assert ("DELETE", f"/chats/{GROUP}/members", None) in fake.requests
+    await bot.session.close()
+
+
+async def test_set_chat_photo_uploads_and_patches_icon() -> None:
+    """Иконка чата ставится токеном загруженной картинки.
+
+    Ссылку вместо токена MAX не принимает — отвечает internal.error, так
+    что путь через загрузку здесь единственный.
+    """
+    fake = FakeChats(bot_is_admin=True)
+    bot = make_chat_bot(fake)
+
+    await bot.set_chat_photo(
+        chat_id=GROUP, photo=BufferedInputFile(b"png", filename="icon.png")
+    )
+
+    patch = next(r for r in fake.requests if r[0] == "PATCH")
+    assert patch[2] == {"icon": {"token": "img-token"}}
     await bot.session.close()

@@ -783,3 +783,27 @@ async def test_sticker_needs_max_code_not_telegram_id() -> None:
         {"type": "sticker", "payload": {"code": "max-sticker-code"}}
     ]
     await bot.session.close()
+
+
+async def test_edit_media_uploads_new_file() -> None:
+    """Замена вложения — новая заливка: ссылок на старое MAX не отдаёт."""
+    fake = FakeMax([MESSAGE_CREATED])
+    bot = make_test_bot(fake)
+    updates = await bot.get_updates()
+    message_id = updates[0].message.message_id  # type: ignore[union-attr]
+
+    await bot.edit_message_media(
+        chat_id=42,
+        message_id=message_id,
+        media=InputMediaPhoto(
+            media=BufferedInputFile(b"green", filename="g.png"), caption="стала зелёной"
+        ),
+    )
+
+    edit = next(r for r in fake.requests if r[0] == "PUT" and r[1] == "/messages")
+    # format не проставляется: подпись без parse_mode — обычный текст.
+    assert edit[2] == {
+        "attachments": [{"type": "image", "payload": {"token": "img-token"}}],
+        "text": "стала зелёной",
+    }
+    await bot.session.close()
