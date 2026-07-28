@@ -24,6 +24,7 @@
 from __future__ import annotations
 
 import mimetypes
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from aiogram_max.errors import MaxApiError
@@ -32,14 +33,48 @@ if TYPE_CHECKING:
     from aiogram import Bot
     from aiogram.types import InputFile
 
-# aiogram-метод → тип загрузки MAX. Совпадает с типом вложения в сообщении.
-UPLOAD_TYPES: dict[str, str] = {
-    "SendPhoto": "image",
-    "SendVideo": "video",
-    "SendAudio": "audio",
-    "SendVoice": "audio",
-    "SendDocument": "file",
-    "SendAnimation": "video",
+
+@dataclass(frozen=True)
+class Storage:
+    """Хранилище MAX под один тип файлов.
+
+    У каждого свои правила, и все три поля выяснены на живом API: чужое имя
+    поля или несовпадающий content-type хранилище отвергает как 415.
+    """
+
+    field: str
+    """Имя поля в multipart при заливке."""
+
+    fallback_mime: str
+    """Чем подписывать файл, если по имени тип не угадывается."""
+
+
+STORAGES: dict[str, Storage] = {
+    "image": Storage(field="data", fallback_mime="image/jpeg"),
+    "file": Storage(field="data", fallback_mime="application/octet-stream"),
+    "audio": Storage(field="file", fallback_mime="audio/mpeg"),
+    "video": Storage(field="file", fallback_mime="video/mp4"),
+}
+
+
+@dataclass(frozen=True)
+class MediaMethod:
+    """Как разобрать телеграмный метод отправки медиа."""
+
+    file_attr: str
+    """Поле метода, в котором лежит сам файл."""
+
+    storage: str
+    """Тип загрузки MAX; совпадает с типом вложения в сообщении."""
+
+
+MEDIA_METHODS: dict[str, MediaMethod] = {
+    "SendPhoto": MediaMethod(file_attr="photo", storage="image"),
+    "SendVideo": MediaMethod(file_attr="video", storage="video"),
+    "SendAudio": MediaMethod(file_attr="audio", storage="audio"),
+    "SendVoice": MediaMethod(file_attr="voice", storage="audio"),
+    "SendDocument": MediaMethod(file_attr="document", storage="file"),
+    "SendAnimation": MediaMethod(file_attr="animation", storage="video"),
 }
 
 
@@ -50,47 +85,16 @@ def upload_type_for(method_name: str, filename: str) -> str:
     разные хранилища: gif принимает картиночное, видео-хранилище отвечает
     на него 415. Поэтому решаем по расширению, а не по имени метода.
     """
-    base = UPLOAD_TYPES[method_name]
-    if base == "video" and filename.lower().endswith(".gif"):
+    storage = MEDIA_METHODS[method_name].storage
+    if storage == "video" and filename.lower().endswith(".gif"):
         return "image"
-    return base
-
-
-# Имя поля в multipart при заливке. Хранилища у типов разные, и каждое
-# ждёт своё имя: чужое отвергается как 415 Unsupported Media Type.
-UPLOAD_FIELDS: dict[str, str] = {
-    "image": "data",
-    "file": "data",
-    "audio": "file",
-    "video": "file",
-}
-
-# Поле метода, в котором лежит сам файл.
-FILE_FIELDS: dict[str, str] = {
-    "SendPhoto": "photo",
-    "SendVideo": "video",
-    "SendAudio": "audio",
-    "SendVoice": "voice",
-    "SendDocument": "document",
-    "SendAnimation": "animation",
-}
-
-
-# Чем подписывать файл, если по имени тип не угадывается. Хранилище MAX
-# сверяет пару «расширение + content-type» и на несовпадение отвечает 415,
-# поэтому octet-stream годится только для произвольных файлов.
-FALLBACK_MIME: dict[str, str] = {
-    "image": "image/jpeg",
-    "video": "video/mp4",
-    "audio": "audio/mpeg",
-    "file": "application/octet-stream",
-}
+    return storage
 
 
 def guess_mime(filename: str, upload_type: str) -> str:
     """Content-type для заливки: по имени файла, иначе типовой по умолчанию."""
     guessed, _ = mimetypes.guess_type(filename)
-    return guessed or FALLBACK_MIME[upload_type]
+    return guessed or STORAGES[upload_type].fallback_mime
 
 
 async def read_input_file(file: InputFile, bot: Bot) -> bytes:
