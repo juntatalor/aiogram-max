@@ -29,10 +29,11 @@ from aiogram.methods import (
     SendMessage,
     TelegramMethod,
 )
-from aiogram.types import File, Update, User
+from aiogram.types import File, MessageEntity, Update, User
 
 from aiogram_max import converters
 from aiogram_max.errors import MaxApiError, NotImplementedYet, UnsupportedByMax
+from aiogram_max.markup import MarkupPolicy, entities_to_html, markdown_to_html
 
 if TYPE_CHECKING:
     from aiogram import Bot
@@ -86,6 +87,7 @@ class MaxSession(BaseSession):
         *,
         api_url: str = MAX_API_URL,
         unsupported: UnsupportedPolicy = UnsupportedPolicy.WARN,
+        markup: MarkupPolicy = MarkupPolicy.CONVERT,
         client: httpx.AsyncClient | None = None,
     ) -> None:
         # file="{path}" — ключевой момент для скачивания вложений. aiogram
@@ -97,6 +99,7 @@ class MaxSession(BaseSession):
         self._token = token
         self._api_url = api_url.rstrip("/")
         self._unsupported = unsupported
+        self._markup = markup
         self._client = client or httpx.AsyncClient(timeout=90.0)
         # Позиция в ленте событий: у MAX это marker, у aiogram — offset.
         # Смысл один и тот же, поэтому значения сшиты (см. _get_updates).
@@ -183,6 +186,43 @@ class MaxSession(BaseSession):
             raise UnsupportedByMax(f"{what} ({detail})")
         logger.warning("%s не поддерживается MAX и отброшен: %s", what, detail)
 
+    # --- Разметка -------------------------------------------------------
+
+    def _render_markup(
+        self,
+        bot: Bot,
+        text: str | None,
+        parse_mode: str | Default | None,
+        entities: list[MessageEntity] | None,
+    ) -> tuple[str, str | None]:
+        """Текст aiogram → (текст для MAX, значение format).
+
+        Телеграмная разметка приходит двумя способами — ``parse_mode`` над
+        сырым текстом либо ``entities`` со смещениями. Оба переводим в html:
+        это единственный формат MAX, покрывающий всю модель Telegram
+        (в частности подчёркивание, которого в markdown у MAX нет).
+
+        ``MarkupPolicy.RAW`` возвращает текст нетронутым — для тех, кто
+        предпочитает форматировать под MAX самостоятельно.
+        """
+        body = text or ""
+        # parse_mode может прийти сентинелом Default — реальное значение
+        # тогда лежит в настройках бота, а не в самом методе.
+        if isinstance(parse_mode, Default):
+            parse_mode = bot.default.parse_mode
+        mode = str(parse_mode) if parse_mode else None
+
+        if self._markup is MarkupPolicy.RAW:
+            return body, converters.parse_mode_to_format(mode)
+
+        if entities:
+            return entities_to_html(body, entities, self._degrade), "html"
+        if mode is None:
+            return body, None
+        if mode == "HTML":
+            return body, "html"
+        return markdown_to_html(body, self._degrade), "html"
+
     # --- Трансляция методов --------------------------------------------
 
     async def _get_updates(self, bot: Bot, method: GetUpdates) -> list[Update]:
@@ -240,7 +280,12 @@ class MaxSession(BaseSession):
         return max(marker - count, self._last_update_id + 1)
 
     async def _send_message(self, bot: Bot, method: SendMessage) -> Any:
-        payload: dict[str, Any] = {"text": method.text}
+        text, fmt = self._render_markup(
+            bot, method.text, method.parse_mode, method.entities
+        )
+        payload: dict[str, Any] = {"text": text}
+        if fmt is not None:
+            payload["format"] = fmt
 
         attachment = converters.keyboard_to_attachment(
             method.reply_markup,  # type: ignore[arg-type]
@@ -250,19 +295,6 @@ class MaxSession(BaseSession):
             payload["attachments"] = [attachment]
 
         # Параметры, у которых в MAX есть прямой аналог.
-        # parse_mode может прийти сентинелом Default — тогда реальное значение
-        # лежит в настройках бота, а не в самом методе.
-        parse_mode = method.parse_mode
-        if isinstance(parse_mode, Default):
-            parse_mode = bot.default.parse_mode
-        if (fmt := converters.parse_mode_to_format(parse_mode)) is not None:
-            payload["format"] = fmt
-            if parse_mode == "MarkdownV2":
-                self._degrade(
-                    "parse_mode=MarkdownV2",
-                    "у MAX CommonMark: экранирование MarkdownV2 отличается, "
-                    "отправлено как markdown",
-                )
         if method.disable_notification is not None:
             payload["notify"] = not method.disable_notification
         if method.reply_to_message_id is not None:
@@ -289,9 +321,13 @@ class MaxSession(BaseSession):
         mid = self._mid_by_seq.get(int(method.message_id or 0))
         if mid is None:
             raise MaxApiError(0, f"неизвестный message_id={method.message_id}")
-        await self._request(
-            "PUT", "/messages", params={"message_id": mid}, json={"text": method.text}
+        text, fmt = self._render_markup(
+            bot, method.text, method.parse_mode, method.entities
         )
+        body: dict[str, Any] = {"text": text}
+        if fmt is not None:
+            body["format"] = fmt
+        await self._request("PUT", "/messages", params={"message_id": mid}, json=body)
         return True
 
     async def _delete_message(self, bot: Bot, method: DeleteMessage) -> bool:

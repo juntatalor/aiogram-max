@@ -5,6 +5,7 @@ from __future__ import annotations
 import httpx
 from aiogram import Bot
 
+from aiogram_max.markup import MarkupPolicy
 from aiogram_max.session import MAX_API_URL, MaxSession, UnsupportedPolicy
 
 # aiogram проверяет форму токена: "<цифры>:<непустая строка>", а Bot.id парсит
@@ -20,6 +21,7 @@ def make_bot(
     bot_id: int = _UNKNOWN_BOT_ID,
     api_url: str = MAX_API_URL,
     unsupported: UnsupportedPolicy = UnsupportedPolicy.WARN,
+    markup: MarkupPolicy = MarkupPolicy.CONVERT,
     client: httpx.AsyncClient | None = None,
     **bot_kwargs: object,
 ) -> Bot:
@@ -36,6 +38,7 @@ def make_bot(
         max_token,
         api_url=api_url,
         unsupported=unsupported,
+        markup=markup,
         client=client,
     )
     return Bot(token=f"{bot_id}:max", session=session, **bot_kwargs)  # type: ignore[arg-type]
@@ -46,6 +49,7 @@ async def create_bot(
     *,
     api_url: str = MAX_API_URL,
     unsupported: UnsupportedPolicy = UnsupportedPolicy.WARN,
+    markup: MarkupPolicy = MarkupPolicy.CONVERT,
     client: httpx.AsyncClient | None = None,
     **bot_kwargs: object,
 ) -> Bot:
@@ -65,6 +69,7 @@ async def create_bot(
         bot_id=me.id,
         api_url=api_url,
         unsupported=unsupported,
+        markup=markup,
         client=client,
         **bot_kwargs,
     )

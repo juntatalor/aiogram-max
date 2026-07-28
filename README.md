@@ -68,6 +68,9 @@ aiogram-`Update`.
 | Живые payload'ы MAX | `tests/test_live_fixtures.py` (6 тестов на снятых с API событиях) |
 | Потеря кнопки без аналога | `test_dropped_button_warns_but_keeps_the_rest` |
 | Маппинг parse_mode / notify / reply | `test_supported_params_are_mapped_not_dropped` |
+| MarkdownV2 → html (включая подчёркивание) | `tests/test_markup.py`, 11 тестов |
+| `entities` → html без потерь | `test_entities_are_no_longer_dropped_silently` |
+| `MarkupPolicy.RAW` не трогает текст | `test_raw_policy_leaves_text_alone` |
 
 ## Неподдерживаемое в MAX
 
@@ -94,7 +97,8 @@ make_bot(token, unsupported=UnsupportedPolicy.STRICT)
 | aiogram | MAX |
 | --- | --- |
 | `parse_mode="HTML"` | `format: html` |
-| `parse_mode="MarkdownV2"` | `format: markdown` + предупреждение (у MAX CommonMark) |
+| `parse_mode="MarkdownV2"` | конвертация в html, см. «Разметка» |
+| `entities=[...]` | конвертация в html, см. «Разметка» |
 | `disable_notification=True` | `notify: false` |
 | `reply_to_message_id` | `link: {type: reply, mid}` |
 
@@ -107,6 +111,49 @@ make_bot(token, unsupported=UnsupportedPolicy.STRICT)
 семантики нет, `POST /answers` с пустым телом отвечает `400 proto.payload`
 («`message` or `notification` required»). Запрос не уходит вовсе. С текстом —
 `answer("Принято")` — уходит как `notification`.
+
+## Разметка
+
+Работает из коробки: бот шлёт привычный телеграмный `parse_mode` или
+`entities`, библиотека переводит это в html, который MAX понимает.
+
+```python
+await bot.send_message(chat_id, "*жирный* и __подчёркнутый__", parse_mode="MarkdownV2")
+# в MAX уедет: {"text": "<b>жирный</b> и <u>подчёркнутый</u>", "format": "html"}
+```
+
+Форматируете под MAX сами — отключите посредника:
+
+```python
+make_bot(token, markup=MarkupPolicy.RAW)   # текст уйдёт как есть
+```
+
+**Почему html, а не markdown.** MAX принимает оба формата, но markdown у него
+CommonMark, а в CommonMark `__текст__` — это жирный. В MarkdownV2 та же запись
+означает подчёркивание, и перевод «markdown в markdown» молча превратил бы
+одно в другое. Тип `underline` MAX отдаёт только за `<u>`. Вдобавок html не
+требует правил экранирования, которых в MarkdownV2 полтора десятка, причём
+внутри кодовых спанов они другие.
+
+**Что MAX действительно поддерживает.** Официальная страница «Форматирование»
+отдаёт 404, поэтому таблица снята с живого API: бот отправил пробу, MAX
+вернул разобранную разметку.
+
+| Разметка | `format: html` | `format: markdown` |
+| --- | --- | --- |
+| жирный | `<b>` → `strong` | `**x**` → `strong` |
+| курсив | `<i>` → `emphasized` | `*x*`, `_x_` → `emphasized` |
+| подчёркнутый | `<u>` → `underline` | **нет**: `__x__` даёт `strong` |
+| зачёркнутый | `<s>` → `strikethrough` | `~~x~~` → `strikethrough` |
+| моноширинный | `<code>`, `<pre>` → `monospaced` | `` `x` `` → `monospaced` |
+| ссылка | `<a href>` → `link` | `[x](url)` → `link` |
+| заголовок | не проверялся | `# x` → `heading` |
+| цитата | `<blockquote>` — **не распознаётся** | `> x` — **не распознаётся** |
+| списки, спойлер | нет | нет |
+
+Чего у MAX нет вовсе — спойлер, цитата, кастомные эмодзи — проходит через ту
+же политику `unsupported`: `WARN` пишет в лог что именно потерялось, `STRICT`
+падает. Текст при этом сохраняется, теряется только оформление.
 
 ## Грабли MAX, которые стоит знать
 
@@ -134,8 +181,7 @@ make_bot(token, unsupported=UnsupportedPolicy.STRICT)
 ## Что ещё не сделано
 * Вложения: `POST /uploads` для отправки, скачивание по прямой ссылке.
 * Webhook (у MAX это рекомендованный для прода транспорт).
-* Форматирование: Telegram HTML/MarkdownV2 против CommonMark у MAX.
-* `bot.id` — заглушка `0`, настоящий id надо брать из `GET /me`.
+* Разметка подписей (`caption`, `caption_entities`) — вместе с вложениями.
 * Покрыты 7 методов из ~100 в Telegram Bot API; остальное — по мере надобности.
 
 ## Установка

@@ -19,10 +19,11 @@ from aiogram.types import (
     InlineKeyboardButton,
     InlineKeyboardMarkup,
     Message,
+    MessageEntity,
     WebAppInfo,
 )
 
-from aiogram_max import UnsupportedByMax, UnsupportedPolicy, make_bot
+from aiogram_max import MarkupPolicy, UnsupportedByMax, UnsupportedPolicy, make_bot
 
 # --- фейковый MAX ---------------------------------------------------------
 
@@ -483,4 +484,80 @@ async def test_update_ids_are_unique_across_batches() -> None:
     updates = await bot.get_updates()
 
     assert [u.update_id for u in updates] == [553, 554]
+    await bot.session.close()
+
+
+async def test_markdown_is_converted_to_html_for_max() -> None:
+    """Бот шлёт телеграмный MarkdownV2 — в MAX уезжает html.
+
+    Это и есть «удобно из коробки»: код бота не трогали, а разметка
+    доехала. Через markdown она бы поехала неправильно — телеграмное
+    ``__текст__`` там означает жирный, а не подчёркивание.
+    """
+    fake = FakeMax()
+    bot = make_test_bot(fake)
+
+    await bot.send_message(
+        chat_id=42,
+        text="*жирный* и __подчёркнутый__",
+        parse_mode="MarkdownV2",
+    )
+
+    sent = next(r for r in fake.requests if r[1] == "/messages")[2]
+    assert sent == {
+        "text": "<b>жирный</b> и <u>подчёркнутый</u>",
+        "format": "html",
+    }
+    await bot.session.close()
+
+
+async def test_entities_are_no_longer_dropped_silently() -> None:
+    """Разметка через entities раньше терялась без единого предупреждения."""
+    fake = FakeMax()
+    bot = make_test_bot(fake)
+
+    await bot.send_message(
+        chat_id=42,
+        text="жирный текст",
+        entities=[MessageEntity(type="bold", offset=0, length=6)],
+    )
+
+    sent = next(r for r in fake.requests if r[1] == "/messages")[2]
+    assert sent == {"text": "<b>жирный</b> текст", "format": "html"}
+    await bot.session.close()
+
+
+async def test_html_passes_through_untouched() -> None:
+    """HTML MAX понимает сам — трогать нечего."""
+    fake = FakeMax()
+    bot = make_test_bot(fake)
+
+    await bot.send_message(chat_id=42, text="<b>жирный</b>", parse_mode="HTML")
+
+    sent = next(r for r in fake.requests if r[1] == "/messages")[2]
+    assert sent == {"text": "<b>жирный</b>", "format": "html"}
+    await bot.session.close()
+
+
+async def test_raw_policy_leaves_text_alone() -> None:
+    """MarkupPolicy.RAW — для тех, кто форматирует под MAX сам."""
+    fake = FakeMax()
+    bot = make_test_bot(fake, markup=MarkupPolicy.RAW)
+
+    await bot.send_message(chat_id=42, text="**жирный**", parse_mode="MarkdownV2")
+
+    sent = next(r for r in fake.requests if r[1] == "/messages")[2]
+    assert sent == {"text": "**жирный**", "format": "markdown"}
+    await bot.session.close()
+
+
+async def test_plain_text_gets_no_format() -> None:
+    """Без parse_mode и entities форматировать нечего — format не шлём."""
+    fake = FakeMax()
+    bot = make_test_bot(fake)
+
+    await bot.send_message(chat_id=42, text="просто текст")
+
+    sent = next(r for r in fake.requests if r[1] == "/messages")[2]
+    assert sent == {"text": "просто текст"}
     await bot.session.close()
