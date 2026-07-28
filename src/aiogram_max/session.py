@@ -44,9 +44,11 @@ from aiogram_max.errors import MaxApiError, NotImplementedYet, UnsupportedByMax
 from aiogram_max.markup import MarkupPolicy, entities_to_html, markdown_to_html
 from aiogram_max.uploads import (
     FILE_FIELDS,
-    UPLOAD_TYPES,
+    UPLOAD_FIELDS,
+    guess_mime,
     read_input_file,
     token_from_upload,
+    upload_type_for,
 )
 
 if TYPE_CHECKING:
@@ -407,8 +409,8 @@ class MaxSession(BaseSession):
         берём из таблиц, дальше загрузка одинаковая.
         """
         name = type(method).__name__
-        upload_type = UPLOAD_TYPES[name]
         file = getattr(method, FILE_FIELDS[name])
+        upload_type = upload_type_for(name, getattr(file, "filename", "") or "")
 
         payload_attachment = await self._upload_attachment(bot, upload_type, file)
         caption, fmt = self._render_markup(
@@ -496,12 +498,18 @@ class MaxSession(BaseSession):
 
         content = await read_input_file(file, bot)
         filename = getattr(file, "filename", None) or "file"
+        field = UPLOAD_FIELDS[upload_type]
+        mime = guess_mime(filename, upload_type)
         response = await self._client.post(
-            url, files={"data": (filename, content)}, timeout=httpx.Timeout(300.0)
+            url,
+            files={field: (filename, content, mime)},
+            timeout=httpx.Timeout(300.0),
         )
         if response.status_code >= 400:
             raise MaxApiError(response.status_code, response.text)
-        token = token_from_upload(response.json())
+        # Аудио и видео отдают токен ещё на шаге со слотом, а в ответ на
+        # саму заливку присылают <retval>1</retval> — разбирать нечего.
+        token = slot.get("token") or token_from_upload(response.json())
         return {"type": upload_type, "payload": {"token": token}}
 
     async def _edit_reply_markup(

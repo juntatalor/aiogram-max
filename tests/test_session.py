@@ -679,3 +679,20 @@ async def test_send_photo_waits_until_attachment_is_ready() -> None:
     sends = [r for r in fake.requests if r[1] == "/messages" and r[0] == "POST"]
     assert len(sends) == 3  # две неудачи и успех
     await bot.session.close()
+
+
+async def test_gif_animation_goes_to_image_storage() -> None:
+    """Телеграмная анимация — это gif или mp4, а у MAX это разные хранилища.
+
+    Видео-хранилище отвечает на gif 415, поэтому решаем по расширению.
+    """
+    fake = FakeMax()
+    bot = make_test_bot(fake)
+
+    await bot.send_animation(
+        chat_id=42, animation=BufferedInputFile(b"gif", filename="a.gif")
+    )
+
+    upload = next(q for q in fake.queries if "type" in q)
+    assert upload["type"] == "image"
+    await bot.session.close()
