@@ -25,8 +25,10 @@ from aiogram.methods import (
     DeleteMessage,
     DeleteMyCommands,
     DeleteWebhook,
+    EditMessageCaption,
     EditMessageReplyMarkup,
     EditMessageText,
+    ForwardMessage,
     GetChat,
     GetChatAdministrators,
     GetChatMember,
@@ -43,8 +45,11 @@ from aiogram.methods import (
     SendAudio,
     SendChatAction,
     SendDocument,
+    SendLocation,
+    SendMediaGroup,
     SendMessage,
     SendPhoto,
+    SendSticker,
     SendVideo,
     SendVoice,
     SetChatDescription,
@@ -109,12 +114,8 @@ CHAT_ACTIONS: dict[str, str] = {
 # Методы, у которых в MAX аналог есть, а у нас руки не дошли. Отличаются от
 # UnsupportedByMax тем, что чинятся патчем, а не свойствами платформы.
 NOT_IMPLEMENTED_PR_WELCOME: dict[str, str] = {
-    "SendMediaGroup": "MAX: несколько attachments в одном POST /messages",
-    "SendLocation": "MAX: attachment type=location",
-    "SendSticker": "MAX: attachment type=sticker",
-    "EditMessageCaption": "MAX: PUT /messages",
+    "SetChatPhoto": "MAX: PATCH /chats/{chat_id} с загруженной иконкой",
     "EditMessageMedia": "MAX: PUT /messages с attachments",
-    "ForwardMessage": "MAX: POST /messages с link type=forward",
     # Бот
     # Чаты
     # Участники
@@ -557,6 +558,107 @@ class MaxSession(BaseSession):
         )
         return True
 
+    async def _send_location(self, bot: Bot, method: SendLocation) -> Any:
+        """Точка на карте.
+
+        Координаты у MAX лежат на верхнем уровне вложения, а не в payload,
+        как у остальных типов: с payload приходит «latitude cannot be null».
+        """
+        payload: dict[str, Any] = {
+            "attachments": [
+                {
+                    "type": "location",
+                    "latitude": method.latitude,
+                    "longitude": method.longitude,
+                }
+            ]
+        }
+        data = await self._request(
+            "POST", "/messages", params={"chat_id": method.chat_id}, json=payload
+        )
+        raw_message = data.get("message", {})
+        self._remember_mid({"message": raw_message})
+        return converters.to_message(raw_message)
+
+    async def _send_media_group(self, bot: Bot, method: SendMediaGroup) -> Any:
+        """Альбом. У MAX это просто несколько вложений в одном сообщении.
+
+        Подпись Telegram берёт у первого элемента — здесь она становится
+        текстом сообщения.
+        """
+        attachments: list[dict[str, Any]] = []
+        caption: str | None = None
+        parse_mode: Any = None
+        for item in method.media:
+            kind = {"photo": "image", "video": "video", "audio": "audio",
+                    "document": "file"}.get(item.type)
+            if kind is None:
+                self._degrade(f"media {item.type}", "нет аналога в MAX")
+                continue
+            attachments.append(await self._upload_attachment(bot, kind, item.media))
+            if caption is None and getattr(item, "caption", None):
+                caption = item.caption
+                parse_mode = getattr(item, "parse_mode", None)
+
+        payload: dict[str, Any] = {"attachments": attachments}
+        if caption:
+            text, fmt = self._render_markup(bot, caption, parse_mode, None)
+            payload["text"] = text
+            if fmt is not None:
+                payload["format"] = fmt
+        data = await self._send_when_attachment_ready(method.chat_id, payload)
+        raw_message = data.get("message", {})
+        self._remember_mid({"message": raw_message})
+        return converters.to_message(raw_message)
+
+    async def _forward_message(self, bot: Bot, method: ForwardMessage) -> Any:
+        """Пересылка: у MAX это ссылка типа forward на исходное сообщение."""
+        mid = self._mid_by_seq.get(int(method.message_id))
+        if mid is None:
+            raise MaxApiError(0, f"неизвестный message_id={method.message_id}")
+        data = await self._request(
+            "POST",
+            "/messages",
+            params={"chat_id": method.chat_id},
+            json={"link": {"type": "forward", "mid": mid}},
+        )
+        raw_message = data.get("message", {})
+        self._remember_mid({"message": raw_message})
+        return converters.to_message(raw_message)
+
+    async def _edit_caption(self, bot: Bot, method: EditMessageCaption) -> bool:
+        """Подпись у MAX — это текст сообщения, правится тем же PUT."""
+        mid = self._mid_by_seq.get(int(method.message_id or 0))
+        if mid is None:
+            raise MaxApiError(0, f"неизвестный message_id={method.message_id}")
+        text, fmt = self._render_markup(
+            bot, method.caption, method.parse_mode, method.caption_entities
+        )
+        body: dict[str, Any] = {"text": text}
+        if fmt is not None:
+            body["format"] = fmt
+        await self._request("PUT", "/messages", params={"message_id": mid}, json=body)
+        return True
+
+    async def _send_sticker(self, bot: Bot, method: SendSticker) -> Any:
+        """Стикеры MAX опознаёт по своему коду, телеграмный file_id ему чужой.
+
+        Библиотека не выдумывает соответствие: код стикера MAX бот должен
+        знать сам и передать строкой.
+        """
+        code = method.sticker if isinstance(method.sticker, str) else None
+        if not code:
+            return self._reject("SendSticker")
+        data = await self._request(
+            "POST",
+            "/messages",
+            params={"chat_id": method.chat_id},
+            json={"attachments": [{"type": "sticker", "payload": {"code": code}}]},
+        )
+        raw_message = data.get("message", {})
+        self._remember_mid({"message": raw_message})
+        return converters.to_message(raw_message)
+
     # --- Вебхук и команды -----------------------------------------------
 
     async def _set_webhook(self, bot: Bot, method: SetWebhook) -> bool:
@@ -837,4 +939,9 @@ _HANDLERS: dict[type[TelegramMethod[Any]], Any] = {
     SetMyCommands: MaxSession._set_my_commands,
     GetMyCommands: MaxSession._get_my_commands,
     DeleteMyCommands: MaxSession._delete_my_commands,
+    SendLocation: MaxSession._send_location,
+    SendMediaGroup: MaxSession._send_media_group,
+    ForwardMessage: MaxSession._forward_message,
+    EditMessageCaption: MaxSession._edit_caption,
+    SendSticker: MaxSession._send_sticker,
 }

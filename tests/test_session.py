@@ -19,6 +19,7 @@ from aiogram.types import (
     CallbackQuery,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
+    InputMediaPhoto,
     Message,
     MessageEntity,
     WebAppInfo,
@@ -712,4 +713,77 @@ async def test_gif_animation_goes_to_image_storage() -> None:
 
     upload = next(q for q in fake.queries if "type" in q)
     assert upload["type"] == "image"
+    await bot.session.close()
+
+
+async def test_location_puts_coordinates_outside_payload() -> None:
+    """У локации координаты лежат на верхнем уровне вложения.
+
+    Остальные типы держат данные в payload, и по аналогии хочется положить
+    туда же — живой MAX на это отвечает «latitude cannot be null».
+    """
+    fake = FakeMax()
+    bot = make_test_bot(fake)
+
+    await bot.send_location(chat_id=42, latitude=55.75, longitude=37.61)
+
+    sent = next(r for r in fake.requests if r[1] == "/messages")[2]
+    assert sent == {
+        "attachments": [
+            {"type": "location", "latitude": 55.75, "longitude": 37.61}
+        ]
+    }
+    await bot.session.close()
+
+
+async def test_media_group_is_one_message_with_many_attachments() -> None:
+    """Альбома как сущности у MAX нет — это несколько вложений в сообщении.
+
+    Подпись Telegram берёт у первого элемента, у MAX она становится текстом
+    самого сообщения.
+    """
+    fake = FakeMax()
+    bot = make_test_bot(fake)
+
+    await bot.send_media_group(
+        chat_id=42,
+        media=[
+            InputMediaPhoto(
+                media=BufferedInputFile(b"a", filename="a.png"), caption="подпись"
+            ),
+            InputMediaPhoto(media=BufferedInputFile(b"b", filename="b.png")),
+        ],
+    )
+
+    sent = next(r for r in fake.requests if r[1] == "/messages")[2] or {}
+    assert len(sent["attachments"]) == 2
+    assert sent["text"] == "подпись"
+    await bot.session.close()
+
+
+async def test_forward_uses_link_not_copy() -> None:
+    """Пересылка у MAX — ссылка на исходное сообщение, а не новая копия."""
+    fake = FakeMax([MESSAGE_CREATED])
+    bot = make_test_bot(fake)
+    updates = await bot.get_updates()
+    message_id = updates[0].message.message_id  # type: ignore[union-attr]
+
+    await bot.forward_message(chat_id=42, from_chat_id=42, message_id=message_id)
+
+    sent = next(r for r in fake.requests if r[1] == "/messages" and r[0] == "POST")[2]
+    assert sent == {"link": {"type": "forward", "mid": "mid-abc"}}
+    await bot.session.close()
+
+
+async def test_sticker_needs_max_code_not_telegram_id() -> None:
+    """Стикер MAX опознаёт по своему коду; телеграмный file_id ему чужой."""
+    fake = FakeMax()
+    bot = make_test_bot(fake, unsupported=UnsupportedPolicy.STRICT)
+
+    await bot.send_sticker(chat_id=42, sticker="max-sticker-code")
+
+    sent = next(r for r in fake.requests if r[1] == "/messages")[2] or {}
+    assert sent["attachments"] == [
+        {"type": "sticker", "payload": {"code": "max-sticker-code"}}
+    ]
     await bot.session.close()

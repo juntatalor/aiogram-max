@@ -49,6 +49,11 @@
 | `DeleteWebhook` | `DELETE /subscriptions` | снимает все подписки |
 | `GetWebhookInfo` | `GET /subscriptions` | отдаём первую: у Telegram адрес один |
 | `SetMyCommands`, `GetMyCommands`, `DeleteMyCommands` | `PATCH /me`, `GET /me` | один список на бота, без scope и языков |
+| `SendLocation` | attachment `location` | координаты вне `payload`, иначе «latitude cannot be null» |
+| `SendMediaGroup` | несколько attachments | альбома как сущности нет; подпись первого элемента становится текстом |
+| `ForwardMessage` | `link: {type: forward}` | ссылка на исходное, а не копия |
+| `EditMessageCaption` | `PUT /messages` | подпись у MAX — это текст сообщения |
+| `SendSticker` | attachment `sticker` | нужен код стикера MAX, телеграмный file_id не подходит |
 
 ## Ближайший план
 
