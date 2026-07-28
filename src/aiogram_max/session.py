@@ -45,18 +45,42 @@ MAX_API_URL = "https://platform-api.max.ru"
 # Методы, у которых в MAX аналог есть, а у нас руки не дошли. Отличаются от
 # UnsupportedByMax тем, что чинятся патчем, а не свойствами платформы.
 NOT_IMPLEMENTED_PR_WELCOME: dict[str, str] = {
+    # Вложения
     "SendPhoto": "MAX: POST /uploads (type=image) + attachment type=image",
     "SendVideo": "MAX: POST /uploads (type=video) + attachment type=video",
     "SendAudio": "MAX: POST /uploads (type=audio) + attachment type=audio",
+    "SendDocument": "MAX: POST /uploads (type=file) + attachment type=file",
     "SendMediaGroup": "MAX: несколько attachments в одном POST /messages",
-    "PinChatMessage": "MAX: POST /chats/{chat_id}/pin",
-    "UnpinChatMessage": "MAX: DELETE /chats/{chat_id}/pin",
+    "SendLocation": "MAX: attachment type=location",
+    "SendSticker": "MAX: attachment type=sticker",
+    # Правка сообщений
+    "EditMessageReplyMarkup": "MAX: PUT /messages с attachment inline_keyboard",
+    "EditMessageCaption": "MAX: PUT /messages",
+    "EditMessageMedia": "MAX: PUT /messages с attachments",
+    "ForwardMessage": "MAX: POST /messages с link type=forward",
+    # Бот
+    "SetMyCommands": "MAX: PATCH /me/commands",
+    "GetMyCommands": "MAX: GET /me, поле commands",
+    "DeleteMyCommands": "MAX: PATCH /me/commands с пустым списком",
+    "SetWebhook": "MAX: POST /subscriptions",
+    "DeleteWebhook": "MAX: DELETE /subscriptions",
+    "GetWebhookInfo": "MAX: GET /subscriptions",
+    # Чаты
     "GetChat": "MAX: GET /chats/{chat_id}",
     "LeaveChat": "MAX: DELETE /chats/{chat_id}/members/me",
-    "GetChatAdministrators": "MAX: GET /chats/{chat_id}/admins",
-    "SetMyCommands": "MAX: PATCH /me с полем commands",
-    "SetWebhook": "MAX: POST /subscriptions",
-    "GetWebhookInfo": "MAX: GET /subscriptions",
+    "SetChatTitle": "MAX: PATCH /chats/{chat_id}",
+    "SetChatDescription": "MAX: PATCH /chats/{chat_id}",
+    "SetChatPhoto": "MAX: PATCH /chats/{chat_id}",
+    "PinChatMessage": "MAX: PUT /chats/{chat_id}/pin",
+    "UnpinChatMessage": "MAX: DELETE /chats/{chat_id}/pin",
+    "UnpinAllChatMessages": "MAX: DELETE /chats/{chat_id}/pin",
+    # Участники
+    "GetChatAdministrators": "MAX: GET /chats/{chat_id}/members/admins",
+    "PromoteChatMember": "MAX: POST /chats/{chat_id}/members/admins",
+    "GetChatMember": "MAX: GET /chats/{chat_id}/members",
+    "GetChatMemberCount": "MAX: GET /chats/{chat_id}/members",
+    "BanChatMember": "MAX: DELETE /chats/{chat_id}/members (у MAX это удаление, не бан)",
+    "UnbanChatMember": "MAX: POST /chats/{chat_id}/members",
 }
 
 
