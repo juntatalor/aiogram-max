@@ -16,8 +16,13 @@ from datetime import UTC, datetime
 from typing import Any
 
 from aiogram.types import (
+    AcceptedGiftTypes,
     CallbackQuery,
     Chat,
+    ChatFullInfo,
+    ChatMemberAdministrator,
+    ChatMemberMember,
+    ChatMemberOwner,
     Document,
     InlineKeyboardMarkup,
     Message,
@@ -215,3 +220,59 @@ def keyboard_to_attachment(
     if not rows:
         return None
     return {"type": "inline_keyboard", "payload": {"buttons": rows}}
+
+# MAX-тип чата → телеграмный. «dialog» — личка, «chat» — группа.
+_CHAT_TYPES = {"dialog": "private", "chat": "group", "channel": "channel"}
+
+
+def to_chat_full_info(raw: dict[str, Any]) -> ChatFullInfo:
+    """MAX chat → aiogram ChatFullInfo (её возвращает getChat)."""
+    return ChatFullInfo(
+        id=raw["chat_id"],
+        type=_CHAT_TYPES.get(str(raw.get("type")), "group"),
+        title=raw.get("title"),
+        description=raw.get("description"),
+        invite_link=raw.get("link"),
+        accent_color_id=0,
+        max_reaction_count=0,
+        # Полей про подарки у MAX нет; aiogram требует объект — отдаём пустой.
+        accepted_gift_types=AcceptedGiftTypes(
+            unlimited_gifts=False,
+            limited_gifts=False,
+            unique_gifts=False,
+            premium_subscription=False,
+            gifts_from_channels=False,
+        ),
+    )
+
+
+def to_chat_member(
+    raw: dict[str, Any],
+) -> ChatMemberOwner | ChatMemberAdministrator | ChatMemberMember:
+    """MAX participant → aiogram ChatMember.
+
+    Прав администратора MAX по отдельности не отдаёт — только флаг is_admin.
+    Поэтому телеграмные can_* проставляем в False: соврать «может всё»
+    опаснее, чем занизить, бот на это ориентируется в проверках доступа.
+    """
+    user = to_user(raw)
+    assert user is not None
+    if raw.get("is_owner"):
+        return ChatMemberOwner(user=user, is_anonymous=False)
+    if raw.get("is_admin"):
+        return ChatMemberAdministrator(
+            user=user,
+            can_be_edited=False,
+            is_anonymous=False,
+            can_manage_chat=True,
+            can_delete_messages=False,
+            can_manage_video_chats=False,
+            can_restrict_members=False,
+            can_promote_members=False,
+            can_change_info=False,
+            can_invite_users=False,
+            can_post_stories=False,
+            can_edit_stories=False,
+            can_delete_stories=False,
+        )
+    return ChatMemberMember(user=user)

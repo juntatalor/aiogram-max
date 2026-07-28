@@ -34,6 +34,17 @@
 | `SendVideo`, `SendAnimation` | то же, `type=video` | |
 | `SendAudio`, `SendVoice` | то же, `type=audio` | |
 | `EditMessageReplyMarkup` | `PUT /messages` | пустой markup убирает кнопки |
+| `GetChat` | `GET /chats/{id}` | тип, название, ссылка-приглашение |
+| `GetChatMemberCount` | там же | отдельной ручки нет, берём поле чата |
+| `GetChatMember` | `/members/me` либо `/members` | выборки по user_id у MAX нет |
+| `GetChatAdministrators` | `/members/admins` | доступно только администратору чата |
+| `PromoteChatMember` | `POST /members/admins` | права целиком, по отдельности MAX их не знает |
+| `PinChatMessage` | `PUT /chats/{id}/pin` | |
+| `UnpinChatMessage`, `UnpinAllChatMessages` | `DELETE /chats/{id}/pin` | закреплённое одно, вызов общий |
+| `SetChatTitle` | `PATCH /chats/{id}` | |
+| `LeaveChat` | `DELETE /members/me` | |
+| `BanChatMember` | `DELETE /members` | у MAX это удаление: юзер вернётся по ссылке |
+| `UnbanChatMember` | — | бана нет, снимать нечего |
 
 ## Ближайший план
 
@@ -46,18 +57,11 @@
 | 🟡 `SetWebhook`, `DeleteWebhook`, `GetWebhookInfo` | `POST/DELETE/GET /subscriptions` | MAX рекомендует webhook для прода, long polling — только для разработки |
 | 🟡 `SetMyCommands`, `GetMyCommands`, `DeleteMyCommands` | `PATCH /me/commands` | меню команд у бота |
 
-### P2 — нужно групповым ботам
+### P2 — по запросу
 
 | Метод | Эндпоинт MAX |
 | --- | --- |
-| 🟡 `GetChat` | `GET /chats/{id}` |
-| 🟡 `LeaveChat` | `DELETE /chats/{id}/members/me` |
-| 🟡 `GetChatAdministrators` | `GET /chats/{id}/members/admins` |
-| 🟡 `PromoteChatMember` | `POST /chats/{id}/members/admins` |
-| 🟡 `GetChatMember`, `GetChatMemberCount` | `GET /chats/{id}/members` |
-| 🟡 `BanChatMember`, `UnbanChatMember` | `DELETE /chats/{id}/members` — семантика ближе к «удалить», чем к «забанить» |
-| 🟡 `PinChatMessage`, `UnpinChatMessage`, `UnpinAllChatMessages` | `PUT` / `DELETE /chats/{id}/pin` |
-| 🟡 `SetChatTitle`, `SetChatDescription`, `SetChatPhoto` | `PATCH /chats/{id}` |
+| 🟡 `SetChatPhoto` | `PATCH /chats/{id}` с загруженной иконкой |
 | 🟡 `SendChatAction` для групп | `POST /chats/{id}/actions` — в личке действий нет, в группах есть |
 
 ### P3 — по запросу
@@ -94,7 +98,13 @@
 `EditMessageLiveLocation`, `StopMessageLiveLocation`, `SetChatPermissions`,
 `RestrictChatMember`, `SetChatMenuButton`, `GetChatMenuButton`,
 `GetUserProfilePhotos`, `GetUserChatBoosts`, `LogOut`, `Close`,
-`SetMyDefaultAdministratorRights`, `SetChatMemberTag`.
+`SetMyDefaultAdministratorRights`, `SetChatMemberTag`, `SetChatDescription`.
+
+Про `SetChatDescription` отдельно: эндпоинт вроде бы есть, но описание не
+меняется. `PATCH /chats/{id}` с этим полем отвечает `200` и отдаёт чат, где
+описание прежнее; если послать одно описание без названия — приходит ошибка
+в теле при статусе `200`. Раз изменение не применяется, честнее считать
+метод неподдерживаемым, чем возвращать успех.
 
 ## Как устроена загрузка вложений
 
