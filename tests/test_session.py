@@ -61,6 +61,7 @@ class FakeMax:
     def __init__(self, updates: list[dict[str, Any]] | None = None) -> None:
         self.updates = updates or []
         self.requests: list[tuple[str, str, dict[str, Any] | None]] = []
+        self.queries: list[dict[str, str]] = []
 
     def transport(self) -> httpx.MockTransport:
         return httpx.MockTransport(self._handle)
@@ -71,6 +72,7 @@ class FakeMax:
 
         body = json.loads(request.content) if request.content else None
         self.requests.append((request.method, request.url.path, body))
+        self.queries.append(dict(request.url.params))
 
         if request.url.path == "/updates":
             batch, self.updates = self.updates, []
@@ -436,4 +438,49 @@ async def test_answer_callback_without_text_is_noop() -> None:
     await dp.feed_update(bot, updates[0])
 
     assert [r for r in fake.requests if r[1] == "/answers"] == []
+    await bot.session.close()
+
+
+async def test_update_id_comes_from_max_marker() -> None:
+    """update_id — позиция события в ленте MAX, а не счётчик в памяти.
+
+    Потребитель (например, свой polling-цикл с дедупом в БД) обязан узнавать
+    событие после рестарта процесса. Счётчик с нуля этого не даёт: после
+    перезапуска первое же событие снова получает id=1 и выглядит как уже
+    обработанное. Позиция берётся из marker'а: MAX отдаёт «следующую
+    ожидаемую», значит последнее событие пачки — marker-1.
+    """
+    fake = FakeMax([MESSAGE_CREATED])
+    bot = make_test_bot(fake)
+
+    updates = await bot.get_updates()
+
+    assert [u.update_id for u in updates] == [554]  # marker=555 в FakeMax
+    await bot.session.close()
+
+
+async def test_offset_from_consumer_becomes_marker() -> None:
+    """offset, переданный потребителем, уходит в MAX как marker.
+
+    Так работает докручивание ленты после рестарта: потребитель хранит
+    последний update_id, просит offset = id + 1, и это ровно marker MAX.
+    """
+    fake = FakeMax([])
+    bot = make_test_bot(fake)
+
+    await bot.get_updates(offset=7912)
+
+    updates_queries = [q for q in fake.queries if "marker" in q]
+    assert updates_queries and updates_queries[0]["marker"] == "7912"
+    await bot.session.close()
+
+
+async def test_update_ids_are_unique_across_batches() -> None:
+    """Пачка из нескольких событий получает подряд идущие id, без наложений."""
+    fake = FakeMax([MESSAGE_CREATED, MESSAGE_CALLBACK])
+    bot = make_test_bot(fake)
+
+    updates = await bot.get_updates()
+
+    assert [u.update_id for u in updates] == [553, 554]
     await bot.session.close()

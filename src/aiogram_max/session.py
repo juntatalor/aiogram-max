@@ -98,10 +98,10 @@ class MaxSession(BaseSession):
         self._api_url = api_url.rstrip("/")
         self._unsupported = unsupported
         self._client = client or httpx.AsyncClient(timeout=90.0)
-        # MAX помечает позицию в ленте событий непрозрачным marker'ом, aiogram
-        # оперирует update_id/offset. Держим и то, и другое.
+        # Позиция в ленте событий: у MAX это marker, у aiogram — offset.
+        # Смысл один и тот же, поэтому значения сшиты (см. _get_updates).
         self._marker: int | None = None
-        self._update_id = 0
+        self._last_update_id = 0
         # aiogram знает сообщение по целочисленному seq, MAX правит и удаляет
         # по строковому mid — храним соответствие.
         self._mid_by_seq: dict[int, str] = {}
@@ -186,6 +186,21 @@ class MaxSession(BaseSession):
     # --- Трансляция методов --------------------------------------------
 
     async def _get_updates(self, bot: Bot, method: GetUpdates) -> list[Update]:
+        """Лента событий MAX в терминах aiogram.
+
+        ``marker`` у MAX — позиция «следующего ожидаемого события», ровно тот
+        же смысл, что у телеграмного ``offset``. Поэтому оба конца
+        сшиваются напрямую: пришедший ``offset`` уходит как ``marker``, а
+        ``update_id`` события — его позиция в ленте, то есть ``marker - 1``
+        для последнего события пачки.
+
+        Раньше ``update_id`` был счётчиком в памяти сессии, и это ломало
+        любого потребителя с дедупом: после рестарта нумерация начиналась
+        заново, и свежие события выглядели уже обработанными.
+        """
+        if method.offset:
+            self._marker = method.offset
+
         params: dict[str, Any] = {}
         if method.timeout is not None:
             params["timeout"] = method.timeout
@@ -195,18 +210,34 @@ class MaxSession(BaseSession):
             params["marker"] = self._marker
 
         data = await self._request("GET", "/updates", params=params)
-        self._marker = data.get("marker", self._marker)
+        raws = data.get("updates", [])
+        marker = data.get("marker", self._marker)
+        self._marker = marker
 
+        base = self._first_id_of_batch(marker, len(raws))
         updates: list[Update] = []
-        for raw in data.get("updates", []):
-            self._update_id += 1
-            update = converters.to_update(raw, self._update_id)
+        for position, raw in enumerate(raws):
+            update_id = base + position
+            self._last_update_id = update_id
+            update = converters.to_update(raw, update_id)
             if update is None:
                 logger.debug("MAX update пропущен: %s", raw.get("update_type"))
                 continue
             self._remember_mid(raw)
             updates.append(update)
         return updates
+
+    def _first_id_of_batch(self, marker: int | None, count: int) -> int:
+        """Позиция первого события пачки.
+
+        Обычно это ``marker - count``. Если MAX не прислал marker или тот
+        сдвинулся меньше, чем на размер пачки, — продолжаем от последнего
+        выданного id. Наложение id между пачками страшнее, чем расхождение
+        с marker'ом: потребитель с дедупом молча потеряет событие.
+        """
+        if marker is None:
+            return self._last_update_id + 1
+        return max(marker - count, self._last_update_id + 1)
 
     async def _send_message(self, bot: Bot, method: SendMessage) -> Any:
         payload: dict[str, Any] = {"text": method.text}
