@@ -360,13 +360,30 @@ async def test_supported_params_are_mapped_not_dropped() -> None:
     await bot.session.close()
 
 
-async def test_typing_indicator_is_silent_noop() -> None:
-    """У MAX нет typing — но это не повод ронять бота даже в строгом режиме."""
+async def test_typing_action_is_translated_not_dropped() -> None:
+    """Индикатор набора у MAX есть, только называется иначе.
+
+    Долгое время здесь стоял no-op с комментарием «у MAX нет typing» —
+    заблуждение, унаследованное из чужой реализации. Живой API отвечает
+    success на POST /chats/{id}/actions, а вот телеграмное слово «typing»
+    не понимает: нужен typing_on.
+    """
     fake = FakeMax()
     bot = make_test_bot(fake, unsupported=UnsupportedPolicy.STRICT)
 
-    assert await bot.send_chat_action(chat_id=42, action="typing") is True
-    assert fake.requests == []
+    await bot.send_chat_action(chat_id=42, action="typing")
+
+    assert ("POST", "/chats/42/actions", {"action": "typing_on"}) in fake.requests
+    await bot.session.close()
+
+
+async def test_unknown_action_degrades_instead_of_failing() -> None:
+    """Действий вроде «выбирает стикер» у MAX нет — говорим и продолжаем."""
+    fake = FakeMax()
+    bot = make_test_bot(fake)
+
+    assert await bot.send_chat_action(chat_id=42, action="choose_sticker") is True
+    assert not [r for r in fake.requests if r[1].endswith("/actions")]
     await bot.session.close()
 
 

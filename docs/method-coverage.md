@@ -28,7 +28,7 @@
 | `AnswerCallbackQuery` | `POST /answers` | пустой ответ — no-op, у MAX нет «просто снять часики» |
 | `GetFile` | — | у MAX ссылка приходит вместе с сообщением, отдаём её как `file_path` |
 | `GetMe` | `GET /me` | |
-| `SendChatAction` | — | тихий no-op: индикатора набора у MAX нет |
+| `SendChatAction` | `POST /chats/{id}/actions` | индикатор есть и в личке, и в группе; названия действий переводятся |
 | `SendPhoto` | `POST /uploads` → attachment | подпись, разметка, клавиатура; ссылка вместо файла — без загрузки |
 | `SendDocument` | то же, `type=file` | |
 | `SendVideo`, `SendAnimation` | то же, `type=video` | |
@@ -45,26 +45,20 @@
 | `LeaveChat` | `DELETE /members/me` | |
 | `BanChatMember` | `DELETE /members` | у MAX это удаление: юзер вернётся по ссылке |
 | `UnbanChatMember` | — | бана нет, снимать нечего |
+| `SetWebhook` | `POST /subscriptions` | прежняя подписка снимается: у MAX это список, а не один адрес |
+| `DeleteWebhook` | `DELETE /subscriptions` | снимает все подписки |
+| `GetWebhookInfo` | `GET /subscriptions` | отдаём первую: у Telegram адрес один |
+| `SetMyCommands`, `GetMyCommands`, `DeleteMyCommands` | `PATCH /me`, `GET /me` | один список на бота, без scope и языков |
 
 ## Ближайший план
 
 Порядок выбран по тому, как часто это нужно живому боту, а не по алфавиту.
 
-### P1 — без этого больно
-
-| Метод | Эндпоинт MAX | Зачем |
-| --- | --- | --- |
-| 🟡 `SetWebhook`, `DeleteWebhook`, `GetWebhookInfo` | `POST/DELETE/GET /subscriptions` | MAX рекомендует webhook для прода, long polling — только для разработки |
-| 🟡 `SetMyCommands`, `GetMyCommands`, `DeleteMyCommands` | `PATCH /me/commands` | меню команд у бота |
-
-### P2 — по запросу
+### Осталось
 
 | Метод | Эндпоинт MAX |
 | --- | --- |
 | 🟡 `SetChatPhoto` | `PATCH /chats/{id}` с загруженной иконкой |
-| 🟡 `SendChatAction` для групп | `POST /chats/{id}/actions` — в личке действий нет, в группах есть |
-
-### P3 — по запросу
 
 | Метод | Комментарий |
 | --- | --- |

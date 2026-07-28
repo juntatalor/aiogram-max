@@ -23,6 +23,8 @@ from aiogram.methods import (
     AnswerCallbackQuery,
     BanChatMember,
     DeleteMessage,
+    DeleteMyCommands,
+    DeleteWebhook,
     EditMessageReplyMarkup,
     EditMessageText,
     GetChat,
@@ -31,7 +33,9 @@ from aiogram.methods import (
     GetChatMemberCount,
     GetFile,
     GetMe,
+    GetMyCommands,
     GetUpdates,
+    GetWebhookInfo,
     LeaveChat,
     PinChatMessage,
     PromoteChatMember,
@@ -45,12 +49,15 @@ from aiogram.methods import (
     SendVoice,
     SetChatDescription,
     SetChatTitle,
+    SetMyCommands,
+    SetWebhook,
     TelegramMethod,
     UnbanChatMember,
     UnpinAllChatMessages,
     UnpinChatMessage,
 )
 from aiogram.types import (
+    BotCommand,
     ChatFullInfo,
     ChatMemberAdministrator,
     ChatMemberMember,
@@ -59,6 +66,7 @@ from aiogram.types import (
     MessageEntity,
     Update,
     User,
+    WebhookInfo,
 )
 
 from aiogram_max import converters
@@ -86,6 +94,18 @@ ATTACHMENT_RETRY_ATTEMPTS = 8
 ATTACHMENT_RETRY_DELAY = 0.5
 ATTACHMENT_RETRY_MAX_DELAY = 4.0
 
+# Телеграмное действие → действие MAX. Список проверен на живом API:
+# всё, чего здесь нет, MAX отвергает как proto.payload.
+CHAT_ACTIONS: dict[str, str] = {
+    "typing": "typing_on",
+    "upload_photo": "sending_photo",
+    "upload_video": "sending_video",
+    "record_video": "sending_video",
+    "upload_voice": "sending_audio",
+    "record_voice": "sending_audio",
+    "upload_document": "sending_file",
+}
+
 # Методы, у которых в MAX аналог есть, а у нас руки не дошли. Отличаются от
 # UnsupportedByMax тем, что чинятся патчем, а не свойствами платформы.
 NOT_IMPLEMENTED_PR_WELCOME: dict[str, str] = {
@@ -96,12 +116,6 @@ NOT_IMPLEMENTED_PR_WELCOME: dict[str, str] = {
     "EditMessageMedia": "MAX: PUT /messages с attachments",
     "ForwardMessage": "MAX: POST /messages с link type=forward",
     # Бот
-    "SetMyCommands": "MAX: PATCH /me/commands",
-    "GetMyCommands": "MAX: GET /me, поле commands",
-    "DeleteMyCommands": "MAX: PATCH /me/commands с пустым списком",
-    "SetWebhook": "MAX: POST /subscriptions",
-    "DeleteWebhook": "MAX: DELETE /subscriptions",
-    "GetWebhookInfo": "MAX: GET /subscriptions",
     # Чаты
     # Участники
 }
@@ -543,6 +557,72 @@ class MaxSession(BaseSession):
         )
         return True
 
+    # --- Вебхук и команды -----------------------------------------------
+
+    async def _set_webhook(self, bot: Bot, method: SetWebhook) -> bool:
+        """Подписка на события. У MAX это подписки, а не «один вебхук».
+
+        Telegram держит ровно один адрес и молча заменяет прежний. MAX
+        копит подписки списком, поэтому повторный вызов с тем же адресом
+        создал бы дубль — сначала снимаем старую.
+        """
+        body: dict[str, Any] = {"url": method.url}
+        if method.secret_token:
+            body["secret"] = method.secret_token
+        if method.allowed_updates:
+            body["update_types"] = list(method.allowed_updates)
+        await self._request("DELETE", "/subscriptions", params={"url": method.url})
+        await self._request("POST", "/subscriptions", json=body)
+        return True
+
+    async def _delete_webhook(self, bot: Bot, method: DeleteWebhook) -> bool:
+        """Снять все наши подписки: телеграмный deleteWebhook — без аргументов."""
+        data = await self._request("GET", "/subscriptions")
+        for sub in data.get("subscriptions", []):
+            url = sub.get("url")
+            if url:
+                await self._request("DELETE", "/subscriptions", params={"url": url})
+        return True
+
+    async def _get_webhook_info(
+        self, bot: Bot, method: GetWebhookInfo
+    ) -> WebhookInfo:
+        """Первая подписка в терминах aiogram: у Telegram адрес всегда один."""
+        data = await self._request("GET", "/subscriptions")
+        subs = data.get("subscriptions", [])
+        return WebhookInfo(
+            url=subs[0].get("url", "") if subs else "",
+            has_custom_certificate=False,
+            pending_update_count=0,
+        )
+
+    async def _set_my_commands(self, bot: Bot, method: SetMyCommands) -> bool:
+        if method.scope is not None or method.language_code is not None:
+            self._degrade(
+                "scope/language_code у команд",
+                "MAX держит один список команд на бота",
+            )
+        commands = [
+            {"name": c.command, "description": c.description} for c in method.commands
+        ]
+        await self._request("PATCH", "/me", json={"commands": commands})
+        return True
+
+    async def _get_my_commands(
+        self, bot: Bot, method: GetMyCommands
+    ) -> list[BotCommand]:
+        data = await self._request("GET", "/me")
+        return [
+            BotCommand(command=c["name"], description=c.get("description") or "")
+            for c in (data.get("commands") or [])
+        ]
+
+    async def _delete_my_commands(
+        self, bot: Bot, method: DeleteMyCommands
+    ) -> bool:
+        await self._request("PATCH", "/me", json={"commands": []})
+        return True
+
     # --- Группы ---------------------------------------------------------
 
     async def _get_chat(self, bot: Bot, method: GetChat) -> ChatFullInfo:
@@ -685,12 +765,25 @@ class MaxSession(BaseSession):
         return user
 
     async def _send_chat_action(self, bot: Bot, method: SendChatAction) -> bool:
-        """У MAX нет typing-индикатора — тихий no-op, а не ошибка.
+        """Индикатор действия: «печатает», «отправляет фото» и так далее.
 
-        Это осознанное исключение из строгой политики: индикатор набора
-        не влияет на смысл диалога, и ронять из-за него бота незачем.
+        Долгое время в библиотеке это был no-op с комментарием «у MAX нет
+        typing-индикатора» — унаследованное заблуждение. Проверка на живом
+        API показала обратное: POST /chats/{id}/actions работает и в группе,
+        и в личке. Названия действий свои, телеграмное «typing» MAX не
+        понимает вовсе, поэтому переводим.
         """
-        logger.debug("SendChatAction проигнорирован: MAX не поддерживает typing")
+        action = CHAT_ACTIONS.get(str(method.action))
+        if action is None:
+            self._degrade(
+                f"chat action {method.action}", "у MAX нет такого индикатора"
+            )
+            return True
+        await self._request(
+            "POST",
+            f"/chats/{method.chat_id}/actions",
+            json={"action": action},
+        )
         return True
 
     # --- Служебное ------------------------------------------------------
@@ -732,4 +825,10 @@ _HANDLERS: dict[type[TelegramMethod[Any]], Any] = {
     PromoteChatMember: MaxSession._promote_member,
     BanChatMember: MaxSession._ban_member,
     UnbanChatMember: MaxSession._unban_member,
+    SetWebhook: MaxSession._set_webhook,
+    DeleteWebhook: MaxSession._delete_webhook,
+    GetWebhookInfo: MaxSession._get_webhook_info,
+    SetMyCommands: MaxSession._set_my_commands,
+    GetMyCommands: MaxSession._get_my_commands,
+    DeleteMyCommands: MaxSession._delete_my_commands,
 }
