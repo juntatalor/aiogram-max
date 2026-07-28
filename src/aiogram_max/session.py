@@ -9,6 +9,7 @@ Bot собирает типизированный объект метода (``S
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import AsyncGenerator
 from enum import StrEnum
@@ -21,12 +22,19 @@ from aiogram.client.telegram import TelegramAPIServer
 from aiogram.methods import (
     AnswerCallbackQuery,
     DeleteMessage,
+    EditMessageReplyMarkup,
     EditMessageText,
     GetFile,
     GetMe,
     GetUpdates,
+    SendAnimation,
+    SendAudio,
     SendChatAction,
+    SendDocument,
     SendMessage,
+    SendPhoto,
+    SendVideo,
+    SendVoice,
     TelegramMethod,
 )
 from aiogram.types import File, MessageEntity, Update, User
@@ -34,6 +42,12 @@ from aiogram.types import File, MessageEntity, Update, User
 from aiogram_max import converters
 from aiogram_max.errors import MaxApiError, NotImplementedYet, UnsupportedByMax
 from aiogram_max.markup import MarkupPolicy, entities_to_html, markdown_to_html
+from aiogram_max.uploads import (
+    FILE_FIELDS,
+    UPLOAD_TYPES,
+    read_input_file,
+    token_from_upload,
+)
 
 if TYPE_CHECKING:
     from aiogram import Bot
@@ -42,19 +56,18 @@ logger = logging.getLogger(__name__)
 
 MAX_API_URL = "https://platform-api.max.ru"
 
+# Сразу после заливки MAX ещё обрабатывает файл и отвечает на отправку
+# 400 attachment.not.ready. Ждём с нарастающей паузой.
+ATTACHMENT_RETRY_ATTEMPTS = 8
+ATTACHMENT_RETRY_DELAY = 0.5
+ATTACHMENT_RETRY_MAX_DELAY = 4.0
+
 # Методы, у которых в MAX аналог есть, а у нас руки не дошли. Отличаются от
 # UnsupportedByMax тем, что чинятся патчем, а не свойствами платформы.
 NOT_IMPLEMENTED_PR_WELCOME: dict[str, str] = {
-    # Вложения
-    "SendPhoto": "MAX: POST /uploads (type=image) + attachment type=image",
-    "SendVideo": "MAX: POST /uploads (type=video) + attachment type=video",
-    "SendAudio": "MAX: POST /uploads (type=audio) + attachment type=audio",
-    "SendDocument": "MAX: POST /uploads (type=file) + attachment type=file",
     "SendMediaGroup": "MAX: несколько attachments в одном POST /messages",
     "SendLocation": "MAX: attachment type=location",
     "SendSticker": "MAX: attachment type=sticker",
-    # Правка сообщений
-    "EditMessageReplyMarkup": "MAX: PUT /messages с attachment inline_keyboard",
     "EditMessageCaption": "MAX: PUT /messages",
     "EditMessageMedia": "MAX: PUT /messages с attachments",
     "ForwardMessage": "MAX: POST /messages с link type=forward",
@@ -387,6 +400,133 @@ class MaxSession(BaseSession):
         )
         return True
 
+    async def _send_media(self, bot: Bot, method: TelegramMethod[Any]) -> Any:
+        """SendPhoto / SendDocument / SendVideo / SendAudio → вложение MAX.
+
+        Общий путь для всех медиа-методов: тип вложения и имя поля с файлом
+        берём из таблиц, дальше загрузка одинаковая.
+        """
+        name = type(method).__name__
+        upload_type = UPLOAD_TYPES[name]
+        file = getattr(method, FILE_FIELDS[name])
+
+        payload_attachment = await self._upload_attachment(bot, upload_type, file)
+        caption, fmt = self._render_markup(
+            bot,
+            getattr(method, "caption", None),
+            getattr(method, "parse_mode", None),
+            getattr(method, "caption_entities", None),
+        )
+
+        payload: dict[str, Any] = {"attachments": [payload_attachment]}
+        if caption:
+            payload["text"] = caption
+            if fmt is not None:
+                payload["format"] = fmt
+
+        keyboard = converters.keyboard_to_attachment(
+            getattr(method, "reply_markup", None),
+            degrade=self._degrade,
+        )
+        if keyboard:
+            payload["attachments"].append(keyboard)
+        if getattr(method, "disable_notification", None) is not None:
+            payload["notify"] = not method.disable_notification  # type: ignore[attr-defined]
+
+        data = await self._send_when_attachment_ready(
+            method.chat_id,  # type: ignore[attr-defined]
+            payload,
+        )
+        raw_message = data.get("message", {})
+        self._remember_mid({"message": raw_message})
+        return converters.to_message(raw_message)
+
+    async def _send_when_attachment_ready(
+        self, chat_id: Any, payload: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Отправить сообщение с вложением, дождавшись обработки файла.
+
+        Своего рода рукопожатие, которого нет в Telegram: сразу после
+        заливки MAX отвечает на отправку ``400 attachment.not.ready`` —
+        файл ещё обрабатывается на его стороне. Ждём и повторяем; ошибку
+        отдаём наружу, только если файл так и не доехал.
+        """
+        delay = ATTACHMENT_RETRY_DELAY
+        for attempt in range(1, ATTACHMENT_RETRY_ATTEMPTS + 1):
+            try:
+                return await self._request(
+                    "POST", "/messages", params={"chat_id": chat_id}, json=payload
+                )
+            except MaxApiError as exc:
+                if "attachment.not.ready" not in str(exc):
+                    raise
+                if attempt == ATTACHMENT_RETRY_ATTEMPTS:
+                    raise
+                logger.debug(
+                    "MAX ещё обрабатывает вложение, попытка %s из %s",
+                    attempt,
+                    ATTACHMENT_RETRY_ATTEMPTS,
+                )
+                await asyncio.sleep(delay)
+                delay = min(delay * 2, ATTACHMENT_RETRY_MAX_DELAY)
+        raise MaxApiError(0, "недостижимо: цикл ожидания вложения")
+
+    async def _upload_attachment(
+        self, bot: Bot, upload_type: str, file: Any
+    ) -> dict[str, Any]:
+        """Залить файл и вернуть готовое вложение для POST /messages.
+
+        Строка вместо файла — это telegram-овский file_id либо ссылка.
+        Для картинок MAX принимает прямую ссылку, в остальных случаях
+        переносить нечего: file_id чужой платформы там ничего не значит.
+        """
+        if isinstance(file, str):
+            if file.startswith(("http://", "https://")) and upload_type == "image":
+                return {"type": "image", "payload": {"url": file}}
+            self._degrade(
+                f"{upload_type} по строке",
+                "MAX не знает telegram file_id; передавайте файл или ссылку на картинку",
+            )
+            return {"type": upload_type, "payload": {"url": file}}
+
+        slot = await self._request("POST", "/uploads", params={"type": upload_type})
+        url = slot.get("url")
+        if not url:
+            raise MaxApiError(0, f"MAX не выдал ссылку для загрузки: {slot}")
+
+        content = await read_input_file(file, bot)
+        filename = getattr(file, "filename", None) or "file"
+        response = await self._client.post(
+            url, files={"data": (filename, content)}, timeout=httpx.Timeout(300.0)
+        )
+        if response.status_code >= 400:
+            raise MaxApiError(response.status_code, response.text)
+        token = token_from_upload(response.json())
+        return {"type": upload_type, "payload": {"token": token}}
+
+    async def _edit_reply_markup(
+        self, bot: Bot, method: EditMessageReplyMarkup
+    ) -> bool:
+        """Заменить клавиатуру у отправленного сообщения.
+
+        В MAX клавиатура — обычное вложение, поэтому правка идёт тем же
+        PUT /messages. Пустой reply_markup убирает кнопки.
+        """
+        mid = self._mid_by_seq.get(int(method.message_id or 0))
+        if mid is None:
+            raise MaxApiError(0, f"неизвестный message_id={method.message_id}")
+        keyboard = converters.keyboard_to_attachment(
+            method.reply_markup,
+            degrade=self._degrade,
+        )
+        await self._request(
+            "PUT",
+            "/messages",
+            params={"message_id": mid},
+            json={"attachments": [keyboard] if keyboard else []},
+        )
+        return True
+
     async def _get_file(self, bot: Bot, method: GetFile) -> File:
         """У MAX нет getFile: ссылка на вложение приходит вместе с сообщением.
 
@@ -433,4 +573,11 @@ _HANDLERS: dict[type[TelegramMethod[Any]], Any] = {
     GetFile: MaxSession._get_file,
     GetMe: MaxSession._get_me,
     SendChatAction: MaxSession._send_chat_action,
+    EditMessageReplyMarkup: MaxSession._edit_reply_markup,
+    SendPhoto: MaxSession._send_media,
+    SendVideo: MaxSession._send_media,
+    SendAudio: MaxSession._send_media,
+    SendVoice: MaxSession._send_media,
+    SendDocument: MaxSession._send_media,
+    SendAnimation: MaxSession._send_media,
 }

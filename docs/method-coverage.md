@@ -29,6 +29,11 @@
 | `GetFile` | — | у MAX ссылка приходит вместе с сообщением, отдаём её как `file_path` |
 | `GetMe` | `GET /me` | |
 | `SendChatAction` | — | тихий no-op: индикатора набора у MAX нет |
+| `SendPhoto` | `POST /uploads` → attachment | подпись, разметка, клавиатура; ссылка вместо файла — без загрузки |
+| `SendDocument` | то же, `type=file` | |
+| `SendVideo`, `SendAnimation` | то же, `type=video` | |
+| `SendAudio`, `SendVoice` | то же, `type=audio` | |
+| `EditMessageReplyMarkup` | `PUT /messages` | пустой markup убирает кнопки |
 
 ## Ближайший план
 
@@ -38,8 +43,6 @@
 
 | Метод | Эндпоинт MAX | Зачем |
 | --- | --- | --- |
-| 🟡 `SendPhoto`, `SendDocument`, `SendVideo`, `SendAudio` | `POST /uploads` → attachment | картинка в ответе — второй по частоте сценарий после текста |
-| 🟡 `EditMessageReplyMarkup` | `PUT /messages` | убрать кнопки после клика; сейчас единственный способ — переслать сообщение целиком |
 | 🟡 `SetWebhook`, `DeleteWebhook`, `GetWebhookInfo` | `POST/DELETE/GET /subscriptions` | MAX рекомендует webhook для прода, long polling — только для разработки |
 | 🟡 `SetMyCommands`, `GetMyCommands`, `DeleteMyCommands` | `PATCH /me/commands` | меню команд у бота |
 
@@ -93,13 +96,34 @@
 `GetUserProfilePhotos`, `GetUserChatBoosts`, `LogOut`, `Close`,
 `SetMyDefaultAdministratorRights`, `SetChatMemberTag`.
 
+## Как устроена загрузка вложений
+
+Схема двухшаговая, и в справочнике описана наполовину — ниже то, что
+выяснено на живом API:
+
+1. `POST /uploads?type=image|video|audio|file` отдаёт `{"url": ...}`.
+   Токена на этом шаге нет, хотя документация обещает его сразу.
+2. На полученный url кладётся файл, `multipart`, имя поля — **`data`**.
+   Ответ различается: у картинок `{"photos": {"<ключ>": {"token": ...}}}`,
+   у файлов, видео и аудио — `{"fileId": ..., "token": ...}`.
+3. Токен уходит в сообщение как `{"type": ..., "payload": {"token": ...}}`.
+
+Две вещи, на которых легко споткнуться:
+
+* **Заливка отвечает `200` даже на отказ** — ошибка лежит в теле
+  (`{"error_code": "503", "error_data": "IMAGE_INVALID_FORMAT"}`).
+* **Файл не готов сразу.** Отправка сообщения сразу после заливки отвечает
+  `400 attachment.not.ready`: MAX ещё обрабатывает файл. Библиотека ждёт и
+  повторяет с нарастающей паузой — в Telegram такого рукопожатия нет, и
+  портированный бот о нём не подозревает.
+
 ## Разметка — отдельная история
 
 Форматирование не метод, а параметр, и работает уже сейчас: `parse_mode`
 (`HTML`, `MarkdownV2`, `Markdown`) и `entities` переводятся в html, понятный MAX.
 Подробности и таблица поддерживаемых тегов — в [README](../README.md#разметка).
 
-Не покрыто: `caption` и `caption_entities` — они появятся вместе с вложениями.
+`caption` и `caption_entities` у вложений — тоже покрыты.
 
 ## Как добавить метод
 

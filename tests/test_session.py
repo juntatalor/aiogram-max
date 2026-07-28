@@ -15,6 +15,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.methods import SendPoll
 from aiogram.types import (
+    BufferedInputFile,
     CallbackQuery,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
@@ -63,6 +64,8 @@ class FakeMax:
         self.updates = updates or []
         self.requests: list[tuple[str, str, dict[str, Any] | None]] = []
         self.queries: list[dict[str, str]] = []
+        # Сколько раз отправка сообщения ответит «вложение ещё не готово».
+        self.fail_messages_times = 0
 
     def transport(self) -> httpx.MockTransport:
         return httpx.MockTransport(self._handle)
@@ -71,7 +74,11 @@ class FakeMax:
         import asyncio
         import json
 
-        body = json.loads(request.content) if request.content else None
+        try:
+            body = json.loads(request.content) if request.content else None
+        except json.JSONDecodeError:
+            # Заливка файла идёт multipart'ом, а не JSON.
+            body = None
         self.requests.append((request.method, request.url.path, body))
         self.queries.append(dict(request.url.params))
 
@@ -85,6 +92,15 @@ class FakeMax:
                 await asyncio.sleep(0.05)
             return httpx.Response(200, json={"updates": batch, "marker": 555})
         if request.url.path == "/messages" and request.method == "POST":
+            if self.fail_messages_times > 0:
+                self.fail_messages_times -= 1
+                return httpx.Response(
+                    400,
+                    json={
+                        "code": "attachment.not.ready",
+                        "message": "errors.process.attachment.file.not.processed",
+                    },
+                )
             return httpx.Response(
                 200,
                 json={
@@ -96,6 +112,17 @@ class FakeMax:
                     }
                 },
             )
+        if request.url.path == "/uploads":
+            # Шаг 1: MAX отдаёт только ссылку, токена здесь ещё нет.
+            kind = request.url.params.get("type")
+            return httpx.Response(200, json={"url": f"https://up.max.test/{kind}"})
+        if request.url.host == "up.max.test":
+            # Шаг 2: ответ на заливку отличается по типам — так на живом API.
+            if request.url.path.endswith("image"):
+                return httpx.Response(
+                    200, json={"photos": {"k1": {"token": "img-token"}}}
+                )
+            return httpx.Response(200, json={"fileId": 1, "token": "file-token"})
         if request.url.host == "files.max.ru":
             return httpx.Response(200, content=b"docx-bytes")
         if request.url.path == "/me":
@@ -560,4 +587,95 @@ async def test_plain_text_gets_no_format() -> None:
 
     sent = next(r for r in fake.requests if r[1] == "/messages")[2]
     assert sent == {"text": "просто текст"}
+    await bot.session.close()
+
+
+async def test_send_photo_uploads_and_attaches_token() -> None:
+    """Картинка: слот → заливка → вложение с токеном из ответа заливки.
+
+    Схема выяснена на живом MAX: /uploads отдаёт только ссылку, токен
+    приходит после заливки, причём у картинок он спрятан внутри photos.
+    """
+    fake = FakeMax()
+    bot = make_test_bot(fake)
+
+    await bot.send_photo(
+        chat_id=42,
+        photo=BufferedInputFile(b"png-bytes", filename="pic.png"),
+        caption="*подпись*",
+        parse_mode="MarkdownV2",
+    )
+
+    assert any(r[1] == "/uploads" for r in fake.requests)
+    sent = next(r for r in fake.requests if r[1] == "/messages")[2]
+    assert sent == {
+        "attachments": [{"type": "image", "payload": {"token": "img-token"}}],
+        "text": "<b>подпись</b>",
+        "format": "html",
+    }
+    await bot.session.close()
+
+
+async def test_send_document_uses_file_token() -> None:
+    """Файлы отдают токен на верхнем уровне, а не внутри photos."""
+    fake = FakeMax()
+    bot = make_test_bot(fake)
+
+    await bot.send_document(
+        chat_id=42, document=BufferedInputFile(b"doc", filename="a.txt")
+    )
+
+    sent = next(r for r in fake.requests if r[1] == "/messages")[2]
+    assert sent == {"attachments": [{"type": "file", "payload": {"token": "file-token"}}]}
+    await bot.session.close()
+
+
+async def test_photo_by_url_skips_upload() -> None:
+    """Готовую ссылку MAX принимает как есть — грузить нечего."""
+    fake = FakeMax()
+    bot = make_test_bot(fake)
+
+    await bot.send_photo(chat_id=42, photo="https://example.com/pic.png")
+
+    assert not any(r[1] == "/uploads" for r in fake.requests)
+    sent = next(r for r in fake.requests if r[1] == "/messages")[2]
+    assert sent == {
+        "attachments": [
+            {"type": "image", "payload": {"url": "https://example.com/pic.png"}}
+        ]
+    }
+    await bot.session.close()
+
+
+async def test_edit_reply_markup_replaces_keyboard() -> None:
+    """Убрать кнопки после клика — самый частый сценарий правки клавиатуры."""
+    fake = FakeMax([MESSAGE_CREATED])
+    bot = make_test_bot(fake)
+
+    updates = await bot.get_updates()
+    message_id = updates[0].message.message_id  # type: ignore[union-attr]
+
+    await bot.edit_message_reply_markup(chat_id=42, message_id=message_id)
+
+    edit = next(r for r in fake.requests if r[0] == "PUT" and r[1] == "/messages")
+    assert edit[2] == {"attachments": []}
+    await bot.session.close()
+
+
+async def test_send_photo_waits_until_attachment_is_ready() -> None:
+    """MAX обрабатывает залитый файл не мгновенно — ждём и повторяем.
+
+    Сразу после заливки отправка отвечает 400 attachment.not.ready. В
+    Telegram такого рукопожатия нет, поэтому боты его не ждут — ждём мы.
+    """
+    fake = FakeMax()
+    fake.fail_messages_times = 2
+    bot = make_test_bot(fake)
+
+    await bot.send_photo(
+        chat_id=42, photo=BufferedInputFile(b"png", filename="p.png")
+    )
+
+    sends = [r for r in fake.requests if r[1] == "/messages" and r[0] == "POST"]
+    assert len(sends) == 3  # две неудачи и успех
     await bot.session.close()

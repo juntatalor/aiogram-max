@@ -68,6 +68,8 @@ aiogram-`Update`.
 | Живые payload'ы MAX | `tests/test_live_fixtures.py` (6 тестов на снятых с API событиях) |
 | Потеря кнопки без аналога | `test_dropped_button_warns_but_keeps_the_rest` |
 | Маппинг parse_mode / notify / reply | `test_supported_params_are_mapped_not_dropped` |
+| Вложения: загрузка и отправка | `test_send_photo_uploads_and_attaches_token` |
+| Ожидание обработки файла на стороне MAX | `test_send_photo_waits_until_attachment_is_ready` |
 | MarkdownV2 → html (включая подчёркивание) | `tests/test_markup.py`, 11 тестов |
 | `entities` → html без потерь | `test_entities_are_no_longer_dropped_silently` |
 | `MarkupPolicy.RAW` не трогает текст | `test_raw_policy_leaves_text_alone` |
@@ -157,6 +159,9 @@ CommonMark, а в CommonMark `__текст__` — это жирный. В Markdo
 
 ## Грабли MAX, которые стоит знать
 
+* **Вложение не готово сразу после заливки.** Отправка отвечает
+  `400 attachment.not.ready`, пока MAX обрабатывает файл. Библиотека ждёт и
+  повторяет сама, но знать об этом стоит: в Telegram такого шага нет.
 * **`recipient.user_id` — это получатель сообщения, а не собеседник.** В
   событии от пользователя там лежит id бота, в сообщении бота пользователю —
   id пользователя. Подставите его как `chat_id` — бот начнёт молча отвечать
@@ -179,10 +184,9 @@ CommonMark, а в CommonMark `__текст__` — это жирный. В Markdo
   пределах жизни процесса.
 
 ## Что ещё не сделано
-* Вложения: `POST /uploads` для отправки, скачивание по прямой ссылке.
 * Webhook (у MAX это рекомендованный для прода транспорт).
 * Разметка подписей (`caption`, `caption_entities`) — вместе с вложениями.
-* Покрыто 8 методов из 185 в aiogram. Что уже работает, что можно добавить и
+* Покрыто 14 методов из 185 в aiogram. Что уже работает, что можно добавить и
   чего в MAX нет вовсе — в [docs/method-coverage.md](docs/method-coverage.md).
 
 ## Установка
