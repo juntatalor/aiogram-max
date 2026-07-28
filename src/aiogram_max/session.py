@@ -271,14 +271,28 @@ class MaxSession(BaseSession):
         return True
 
     async def _answer_callback(self, bot: Bot, method: AnswerCallbackQuery) -> bool:
-        body: dict[str, Any] = {}
-        if method.text:
-            body["notification"] = method.text
+        """Ответ на callback. Без текста — тихий no-op, запрос не уходит.
+
+        В Telegram пустой ``answer()`` — обычное дело: он просто снимает
+        индикатор загрузки на кнопке, и боты зовут его почти всегда. У MAX
+        такой семантики нет: POST /answers с пустым телом отвечает
+        ``400 proto.payload`` — «`message` or `notification` required».
+
+        Отправлять ради этого пустое уведомление нельзя (юзер увидит пустой
+        popup), а ронять вызов — тем более: пустой ``answer()`` стоит в
+        каждом callback-хендлере, и исключение из него убивает обработку
+        самого клика. Поэтому отправляем, только когда есть что отправить.
+        """
+        if not method.text:
+            logger.debug(
+                "answer_callback без текста пропущен: у MAX нет пустого ответа"
+            )
+            return True
         await self._request(
             "POST",
             "/answers",
             params={"callback_id": method.callback_query_id},
-            json=body,
+            json={"notification": method.text},
         )
         return True
 

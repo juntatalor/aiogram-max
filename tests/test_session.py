@@ -411,3 +411,29 @@ async def test_file_attachment_is_downloadable() -> None:
     assert buffer.read() == b"docx-bytes"
     assert ("GET", "/posts.docx", None) in fake.requests
     await bot.session.close()
+
+
+async def test_answer_callback_without_text_is_noop() -> None:
+    """Пустой ``callback.answer()`` не должен ходить в MAX.
+
+    У MAX нет телеграмной семантики «просто снять индикатор загрузки»:
+    POST /answers с пустым телом отвечает 400 proto.payload — «`message` or
+    `notification` required». Отправлять нечего, поэтому вызов пропускаем.
+    """
+    fake = FakeMax([MESSAGE_CALLBACK])
+    bot = make_test_bot(fake)
+
+    router = Router()
+
+    @router.callback_query()
+    async def on_click(callback: CallbackQuery) -> None:
+        await callback.answer()
+
+    dp = Dispatcher()
+    dp.include_router(router)
+
+    updates = await bot.get_updates()
+    await dp.feed_update(bot, updates[0])
+
+    assert [r for r in fake.requests if r[1] == "/answers"] == []
+    await bot.session.close()
