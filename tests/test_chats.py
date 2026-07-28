@@ -221,3 +221,19 @@ async def test_description_is_not_supported_by_max() -> None:
         await bot.set_chat_description(GROUP, "Новое описание")
     assert not [r for r in fake.requests if r[0] == "PATCH"]
     await bot.session.close()
+
+
+async def test_ban_removes_member_from_chat() -> None:
+    """Удаление обычного участника доходит до MAX как DELETE /members.
+
+    На живой группе проверено, что участник действительно пропадает:
+    счётчик уменьшился с трёх до двух. С владельцем иначе — MAX отвечает
+    успехом и никого не удаляет, но по ответу это неотличимо.
+    """
+    fake = FakeChats(bot_is_admin=True)
+    bot = make_chat_bot(fake)
+
+    await bot.ban_chat_member(GROUP, 134510822)
+
+    assert ("DELETE", f"/chats/{GROUP}/members", None) in fake.requests
+    await bot.session.close()
