@@ -413,9 +413,7 @@ class MaxSession(BaseSession):
         самого клика. Поэтому отправляем, только когда есть что отправить.
         """
         if not method.text:
-            logger.debug(
-                "answer_callback без текста пропущен: у MAX нет пустого ответа"
-            )
+            logger.debug("answer_callback без текста пропущен: у MAX нет пустого ответа")
             return True
         await self._request(
             "POST",
@@ -535,9 +533,7 @@ class MaxSession(BaseSession):
         token = slot.get("token") or token_from_upload(response.json())
         return {"type": upload_type, "payload": {"token": token}}
 
-    async def _edit_reply_markup(
-        self, bot: Bot, method: EditMessageReplyMarkup
-    ) -> bool:
+    async def _edit_reply_markup(self, bot: Bot, method: EditMessageReplyMarkup) -> bool:
         """Заменить клавиатуру у отправленного сообщения.
 
         В MAX клавиатура — обычное вложение, поэтому правка идёт тем же
@@ -590,8 +586,12 @@ class MaxSession(BaseSession):
         caption: str | None = None
         parse_mode: Any = None
         for item in method.media:
-            kind = {"photo": "image", "video": "video", "audio": "audio",
-                    "document": "file"}.get(item.type)
+            kind = {
+                "photo": "image",
+                "video": "video",
+                "audio": "audio",
+                "document": "file",
+            }.get(item.type)
             if kind is None:
                 self._degrade(f"media {item.type}", "нет аналога в MAX")
                 continue
@@ -686,9 +686,7 @@ class MaxSession(BaseSession):
                 await self._request("DELETE", "/subscriptions", params={"url": url})
         return True
 
-    async def _get_webhook_info(
-        self, bot: Bot, method: GetWebhookInfo
-    ) -> WebhookInfo:
+    async def _get_webhook_info(self, bot: Bot, method: GetWebhookInfo) -> WebhookInfo:
         """Первая подписка в терминах aiogram: у Telegram адрес всегда один."""
         data = await self._request("GET", "/subscriptions")
         subs = data.get("subscriptions", [])
@@ -710,18 +708,14 @@ class MaxSession(BaseSession):
         await self._request("PATCH", "/me", json={"commands": commands})
         return True
 
-    async def _get_my_commands(
-        self, bot: Bot, method: GetMyCommands
-    ) -> list[BotCommand]:
+    async def _get_my_commands(self, bot: Bot, method: GetMyCommands) -> list[BotCommand]:
         data = await self._request("GET", "/me")
         return [
             BotCommand(command=c["name"], description=c.get("description") or "")
             for c in (data.get("commands") or [])
         ]
 
-    async def _delete_my_commands(
-        self, bot: Bot, method: DeleteMyCommands
-    ) -> bool:
+    async def _delete_my_commands(self, bot: Bot, method: DeleteMyCommands) -> bool:
         await self._request("PATCH", "/me", json={"commands": []})
         return True
 
@@ -731,9 +725,7 @@ class MaxSession(BaseSession):
         data = await self._request("GET", f"/chats/{method.chat_id}")
         return converters.to_chat_full_info(data)
 
-    async def _get_chat_member_count(
-        self, bot: Bot, method: GetChatMemberCount
-    ) -> int:
+    async def _get_chat_member_count(self, bot: Bot, method: GetChatMemberCount) -> int:
         data = await self._request("GET", f"/chats/{method.chat_id}")
         return int(data.get("participants_count", 0))
 
@@ -746,9 +738,7 @@ class MaxSession(BaseSession):
         листать список: выборки по user_id у него нет.
         """
         if bot.id and int(method.user_id) == int(bot.id):
-            data = await self._request(
-                "GET", f"/chats/{method.chat_id}/members/me"
-            )
+            data = await self._request("GET", f"/chats/{method.chat_id}/members/me")
             return converters.to_chat_member(data)
         data = await self._request("GET", f"/chats/{method.chat_id}/members")
         for raw in data.get("members", []):
@@ -760,9 +750,7 @@ class MaxSession(BaseSession):
         self, bot: Bot, method: GetChatAdministrators
     ) -> list[ChatMemberOwner | ChatMemberAdministrator | ChatMemberMember]:
         """Список админов. MAX отдаёт его только самим администраторам."""
-        data = await self._request(
-            "GET", f"/chats/{method.chat_id}/members/admins"
-        )
+        data = await self._request("GET", f"/chats/{method.chat_id}/members/admins")
         return [converters.to_chat_member(raw) for raw in data.get("members", [])]
 
     async def _leave_chat(self, bot: Bot, method: LeaveChat) -> bool:
@@ -793,9 +781,7 @@ class MaxSession(BaseSession):
         )
         return True
 
-    async def _set_chat_description(
-        self, bot: Bot, method: SetChatDescription
-    ) -> None:
+    async def _set_chat_description(self, bot: Bot, method: SetChatDescription) -> None:
         """Описание чата боту недоступно.
 
         Проверено на живом API: PATCH /chats с description отвечает 200 и
@@ -883,9 +869,7 @@ class MaxSession(BaseSession):
         """
         action = CHAT_ACTIONS.get(str(method.action))
         if action is None:
-            self._degrade(
-                f"chat action {method.action}", "у MAX нет такого индикатора"
-            )
+            self._degrade(f"chat action {method.action}", "у MAX нет такого индикатора")
             return True
         await self._request(
             "POST",

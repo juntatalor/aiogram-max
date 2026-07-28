@@ -123,7 +123,7 @@ await bot.send_message(chat_id, "*жирный* и __подчёркнутый__"
 Форматируете под MAX сами — отключите посредника:
 
 ```python
-make_bot(token, markup=MarkupPolicy.RAW)   # текст уйдёт как есть
+make_bot(token, markup=MarkupPolicy.RAW)  # текст уйдёт как есть
 ```
 
 **Почему html, а не markdown.** MAX принимает оба формата, но markdown у него

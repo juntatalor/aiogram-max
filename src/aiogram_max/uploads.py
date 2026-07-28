@@ -55,6 +55,7 @@ def upload_type_for(method_name: str, filename: str) -> str:
         return "image"
     return base
 
+
 # Имя поля в multipart при заливке. Хранилища у типов разные, и каждое
 # ждёт своё имя: чужое отвергается как 415 Unsupported Media Type.
 UPLOAD_FIELDS: dict[str, str] = {

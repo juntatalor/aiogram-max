@@ -221,6 +221,7 @@ def keyboard_to_attachment(
         return None
     return {"type": "inline_keyboard", "payload": {"buttons": rows}}
 
+
 # MAX-тип чата → телеграмный. «dialog» — личка, «chat» — группа.
 _CHAT_TYPES = {"dialog": "private", "chat": "group", "channel": "channel"}
 

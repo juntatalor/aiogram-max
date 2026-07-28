@@ -690,9 +690,7 @@ async def test_send_photo_waits_until_attachment_is_ready() -> None:
     fake.fail_messages_times = 2
     bot = make_test_bot(fake)
 
-    await bot.send_photo(
-        chat_id=42, photo=BufferedInputFile(b"png", filename="p.png")
-    )
+    await bot.send_photo(chat_id=42, photo=BufferedInputFile(b"png", filename="p.png"))
 
     sends = [r for r in fake.requests if r[1] == "/messages" and r[0] == "POST"]
     assert len(sends) == 3  # две неудачи и успех
@@ -729,9 +727,7 @@ async def test_location_puts_coordinates_outside_payload() -> None:
 
     sent = next(r for r in fake.requests if r[1] == "/messages")[2]
     assert sent == {
-        "attachments": [
-            {"type": "location", "latitude": 55.75, "longitude": 37.61}
-        ]
+        "attachments": [{"type": "location", "latitude": 55.75, "longitude": 37.61}]
     }
     await bot.session.close()
 

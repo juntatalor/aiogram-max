@@ -107,9 +107,7 @@ async def test_commands_round_trip() -> None:
     fake = FakeSettings()
     bot = make_settings_bot(fake)
 
-    await bot.set_my_commands(
-        [BotCommand(command="start", description="Начать")]
-    )
+    await bot.set_my_commands([BotCommand(command="start", description="Начать")])
     assert [c.command for c in await bot.get_my_commands()] == ["start"]
 
     await bot.delete_my_commands()

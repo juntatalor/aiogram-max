@@ -101,7 +101,9 @@ def test_unsupported_entity_is_dropped_with_warning() -> None:
     """Спойлера у MAX нет — оформление снимаем, текст оставляем."""
     losses, degrade = _collector()
     out = entities_to_html(
-        "тайна", [MessageEntity(type="spoiler", offset=0, length=5)], degrade  # type: ignore[arg-type]
+        "тайна",
+        [MessageEntity(type="spoiler", offset=0, length=5)],
+        degrade,  # type: ignore[arg-type]
     )
     assert out == "тайна"
     assert losses and losses[0][0] == "entity spoiler"
