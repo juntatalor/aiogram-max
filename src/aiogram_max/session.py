@@ -114,11 +114,11 @@ class UnsupportedPolicy(StrEnum):
        не расхождение, а работа слоя конвертации, политики не касается.
     """
 
+    # Предупреждение в лог, вызов продолжается урезанным. По умолчанию.
     WARN = "warn"
-    """Предупреждение в лог, вызов продолжается урезанным. По умолчанию."""
 
+    # Поднять UnsupportedByMax. Включается явно при создании бота.
     STRICT = "strict"
-    """Поднять UnsupportedByMax. Включается явно при создании бота."""
 
 
 class MaxSession(MediaMixin, ChatsMixin, SettingsMixin, BaseSession):
