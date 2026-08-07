@@ -505,6 +505,33 @@ async def test_update_id_comes_from_max_marker() -> None:
     await bot.session.close()
 
 
+async def test_marker_is_readable_after_dropped_update() -> None:
+    """Маркер доступен снаружи, даже когда наверх не ушло ни одного события.
+
+    Ради этого свойство и заведено. Потребитель хранит позицию сам и двигает
+    её по обработанным событиям. Незнакомый тип (``message_removed``)
+    библиотека пропускает: наверх приходит пустой список, двигать позицию
+    нечем, следующий запрос возвращает то же событие — опрос встаёт
+    намертво. Именно так встал прод. По маркеру потребитель перешагивает
+    мёртвое событие.
+    """
+    fake = FakeMax([{"update_type": "message_removed", "chat_id": 1, "message_id": "x"}])
+    bot = make_test_bot(fake)
+
+    updates = await bot.get_updates()
+
+    assert updates == []
+    assert bot.session.marker == 555
+    await bot.session.close()
+
+
+async def test_marker_is_none_before_first_request() -> None:
+    """Пока запросов не было, позиции нет — и врать про неё нельзя."""
+    bot = make_test_bot(FakeMax([]))
+    assert bot.session.marker is None
+    await bot.session.close()
+
+
 async def test_offset_from_consumer_becomes_marker() -> None:
     """offset, переданный потребителем, уходит в MAX как marker.
 
