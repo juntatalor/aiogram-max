@@ -1,5 +1,12 @@
 # aiogram-max
 
+[![PyPI](https://img.shields.io/pypi/v/aiogram-max)](https://pypi.org/project/aiogram-max/)
+[![Python](https://img.shields.io/pypi/pyversions/aiogram-max)](https://pypi.org/project/aiogram-max/)
+[![CI](https://github.com/juntatalor/aiogram-max/actions/workflows/ci.yml/badge.svg)](https://github.com/juntatalor/aiogram-max/actions/workflows/ci.yml)
+[![License](https://img.shields.io/pypi/l/aiogram-max)](https://github.com/juntatalor/aiogram-max/blob/master/LICENSE)
+[![Checked with mypy](https://img.shields.io/badge/mypy-strict-2a6db2)](https://mypy-lang.org/)
+[![Ruff](https://img.shields.io/badge/ruff-passing-261230)](https://docs.astral.sh/ruff/)
+
 Запускает бота, написанного на **aiogram**, в мессенджере **MAX** — без правок кода бота.
 
 ```python
