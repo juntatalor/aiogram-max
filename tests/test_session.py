@@ -25,7 +25,13 @@ from aiogram.types import (
     WebAppInfo,
 )
 
-from aiogram_max import MarkupPolicy, UnsupportedByMax, UnsupportedPolicy, make_bot
+from aiogram_max import (
+    MarkupPolicy,
+    MaxSession,
+    UnsupportedByMax,
+    UnsupportedPolicy,
+    make_bot,
+)
 
 # --- фейковый MAX ---------------------------------------------------------
 
@@ -520,16 +526,24 @@ async def test_marker_is_readable_after_dropped_update() -> None:
 
     updates = await bot.get_updates()
 
+    # bot.session у aiogram типизирован как BaseSession, свойство живёт
+    # в нашей MaxSession — сужаем тип, а не давим ошибку через cast.
+    session = bot.session
+    assert isinstance(session, MaxSession)
+
     assert updates == []
-    assert bot.session.marker == 555
-    await bot.session.close()
+    assert session.marker == 555
+    await session.close()
 
 
 async def test_marker_is_none_before_first_request() -> None:
     """Пока запросов не было, позиции нет — и врать про неё нельзя."""
     bot = make_test_bot(FakeMax([]))
-    assert bot.session.marker is None
-    await bot.session.close()
+    session = bot.session
+    assert isinstance(session, MaxSession)
+
+    assert session.marker is None
+    await session.close()
 
 
 async def test_offset_from_consumer_becomes_marker() -> None:
