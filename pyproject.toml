@@ -9,9 +9,13 @@ requires-python = ">=3.12"
 authors = [{ name = "Sergey Borisov", email = "juntatalor@gmail.com" }]
 keywords = ["aiogram", "max", "messenger", "bot", "telegram"]
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    # 4 - Beta, не 5: библиотека работает в проде, но на одном проекте и
+    # без чужих отзывов. Обещать Production/Stable рано.
+    "Development Status :: 4 - Beta",
     "Framework :: AsyncIO",
     "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: 3.14",
@@ -25,7 +29,9 @@ dependencies = [
 
 [project.urls]
 Homepage = "https://github.com/juntatalor/aiogram-max"
+Source = "https://github.com/juntatalor/aiogram-max"
 Issues = "https://github.com/juntatalor/aiogram-max/issues"
+Changelog = "https://github.com/juntatalor/aiogram-max/releases"
 
 [project.optional-dependencies]
 dev = [

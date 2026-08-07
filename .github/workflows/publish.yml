@@ -1,0 +1,55 @@
+name: publish
+
+# Публикация на PyPI по факту релиза на GitHub: тег уже проставлен, версия
+# в pyproject должна ему соответствовать — это проверяется ниже до сборки.
+on:
+  release:
+    types: [published]
+  # Ручной запуск нужен, чтобы прогнать сборку и проверки без публикации:
+  # dry_run по умолчанию включён, публикация требует осознанного выбора.
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Только собрать и проверить, без публикации
+        type: boolean
+        default: true
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      # Доверенная публикация PyPI: короткоживущий OIDC-токен вместо
+      # постоянного секрета в репозитории. Утёкший API-токен PyPI отзывать
+      # некому и некогда — здесь отзывать нечего.
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Версия в pyproject совпадает с тегом
+        # Расхождение тега и версии — самая обидная ошибка релиза: пакет
+        # уезжает под чужим номером, а исправить уже нельзя, версии на PyPI
+        # не переиспользуются. Проверяем до сборки.
+        if: github.event_name == 'release'
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME#v}"
+          VERSION=$(uv run python -c "import tomllib,pathlib; print(tomllib.loads(pathlib.Path('pyproject.toml').read_text())['project']['version'])")
+          echo "тег: $TAG, версия в pyproject: $VERSION"
+          test "$TAG" = "$VERSION"
+
+      - name: Сборка
+        run: uv build
+
+      - name: Проверка метаданных
+        # twine check ловит то, что ломает страницу пакета: битый README,
+        # незакрытую разметку, отсутствующие поля.
+        run: uvx twine check dist/*
+
+      - name: Публикация на PyPI
+        if: github.event_name == 'release' || inputs.dry_run == false
+        run: uv publish --trusted-publishing always
