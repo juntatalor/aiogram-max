@@ -1,6 +1,6 @@
 [project]
 name = "aiogram-max"
-version = "1.1.0"
+version = "1.1.1"
 description = "Запускает aiogram-бота в мессенджере MAX: подменяем сессию, код бота не трогаем"
 readme = "README.md"
 license = "MIT"
