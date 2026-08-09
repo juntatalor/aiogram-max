@@ -97,3 +97,21 @@ def test_live_seq_exceeds_telegram_message_id_range() -> None:
     assert update is not None
     assert update.message is not None
     assert update.message.message_id > 2**31
+
+
+def test_message_created_without_body_does_not_crash() -> None:
+    """MAX умеет прислать message_created без самого сообщения.
+
+    Авария на проде 2026-08-09: такое событие легло в очередь, converters
+    падал на raw["message"], get_updates валился на каждом круге, и опрос
+    MAX встал целиком — люди перестали получать ответы. Пропускаем событие
+    так же, как любой неизвестный тип: один странный апдейт не должен
+    останавливать бота.
+    """
+    raw = {
+        "update_type": "message_created",
+        "timestamp": 1754747657000,
+        "user_locale": "ru",
+    }
+
+    assert converters.to_update(raw, 1) is None

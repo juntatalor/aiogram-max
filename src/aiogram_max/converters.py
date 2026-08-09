@@ -123,7 +123,14 @@ def to_update(raw: dict[str, Any], update_id: int) -> Update | None:
     kind = raw.get("update_type")
 
     if kind == "message_created":
-        return Update(update_id=update_id, message=to_message(raw["message"]))
+        message = raw.get("message")
+        if message is None:
+            # MAX умеет прислать message_created без самого сообщения.
+            # Падение здесь роняет весь get_updates, а значит и опрос целиком:
+            # событие лежит в очереди и валит каждый следующий круг, пока
+            # человек ждёт ответа. Пропускаем, как любой неизвестный тип.
+            return None
+        return Update(update_id=update_id, message=to_message(message))
 
     if kind == "message_callback":
         cb = raw["callback"]
