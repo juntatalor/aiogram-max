@@ -74,6 +74,7 @@ from aiogram_max.errors import MaxApiError, NotImplementedYet, UnsupportedByMax
 from aiogram_max.markup import MarkupPolicy, entities_to_html, markdown_to_html
 from aiogram_max.methods import ChatsMixin, MediaMixin, SettingsMixin
 from aiogram_max.mids import MidRegistry
+from aiogram_max.schemas import LinkType
 
 if TYPE_CHECKING:
     from aiogram import Bot
@@ -366,7 +367,7 @@ class MaxSession(MediaMixin, ChatsMixin, SettingsMixin, BaseSession):
                     f"неизвестный message_id={method.reply_to_message_id}",
                 )
             else:
-                payload["link"] = {"type": "reply", "mid": mid}
+                payload["link"] = {"type": LinkType.REPLY.value, "mid": mid}
 
         return await self._post_message(method.chat_id, payload)
 

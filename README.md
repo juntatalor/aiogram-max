@@ -78,6 +78,9 @@ aiogram-`Update`.
 | Неподдерживаемый метод | `test_unsupported_method_raises_in_strict_mode` |
 | Живые payload'ы MAX | `tests/test_live_fixtures.py` (9 тестов на снятых с API событиях) |
 | Пересланное сообщение → `forward_origin` | `test_live_forward_keeps_text_and_author` |
+| Незнакомое поле в событии не ошибка | `test_unknown_field_is_accepted_not_rejected` |
+| Сломанное событие не роняет пачку | `test_broken_event_is_skipped_without_touching_the_batch` |
+| MAX начал присылать новое поле | `test_live_events_have_no_unknown_fields` |
 | Ответ на сообщение → `reply_to_message` | `test_live_reply_keeps_quoted_message` |
 | Потеря кнопки без аналога | `test_dropped_button_warns_but_keeps_the_rest` |
 | Маппинг parse_mode / notify / reply | `test_supported_params_are_mapped_not_dropped` |
