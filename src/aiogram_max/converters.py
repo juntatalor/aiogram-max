@@ -34,6 +34,9 @@ from aiogram.types import (
 from pydantic import ValidationError
 
 from aiogram_max.schemas import (
+    AttachmentType,
+    ChatType,
+    LinkType,
     MaxAttachment,
     MaxBody,
     MaxLink,
@@ -41,16 +44,22 @@ from aiogram_max.schemas import (
     MaxRecipient,
     MaxUpdate,
     MaxUser,
+    UpdateType,
 )
 
 logger = logging.getLogger(__name__)
 
 # MAX различает диалог с ботом и групповой чат; Telegram — private/group/channel.
-_CHAT_TYPE = {"dialog": "private", "chat": "group", "channel": "channel"}
+_CHAT_TYPE: dict[str, str] = {
+    ChatType.DIALOG: "private",
+    ChatType.CHAT: "group",
+    ChatType.CHANNEL: "channel",
+}
 
 
 def chat_type(max_type: str | None) -> str:
-    return _CHAT_TYPE.get(max_type or "dialog", "private")
+    """MAX chat_type → тип чата Telegram. Незнакомый считаем диалогом."""
+    return _CHAT_TYPE.get(max_type or ChatType.DIALOG, "private")
 
 
 def to_user(raw: dict[str, Any] | MaxUser | None) -> User | None:
@@ -100,11 +109,14 @@ def to_attachments(attachments: list[MaxAttachment] | None) -> dict[str, Any]:
         url = att.payload.url if att.payload else None
         if not url:
             continue
-        if att.type == "image" and "photo" not in fields:
+        if att.type == AttachmentType.IMAGE and "photo" not in fields:
             fields["photo"] = [
                 PhotoSize(file_id=url, file_unique_id=url, width=0, height=0)
             ]
-        elif att.type in {"file", "audio", "video"} and "document" not in fields:
+        elif (
+            att.type in {AttachmentType.FILE, AttachmentType.AUDIO, AttachmentType.VIDEO}
+            and "document" not in fields
+        ):
             fields["document"] = Document(
                 file_id=url,
                 file_unique_id=url,
@@ -136,7 +148,7 @@ def to_linked(link: MaxLink | None, chat: Chat, date: datetime) -> dict[str, Any
     inner = link.message or MaxBody()
     author = to_user(link.sender)
 
-    if link.type == "forward":
+    if link.type == LinkType.FORWARD:
         origin = (
             MessageOriginUser(type=MessageOriginType.USER, date=date, sender_user=author)
             if author is not None
@@ -147,7 +159,7 @@ def to_linked(link: MaxLink | None, chat: Chat, date: datetime) -> dict[str, Any
             )
         )
         return {"forward_origin": origin, "forward_text": inner.text}
-    if link.type == "reply":
+    if link.type == LinkType.REPLY:
         return {
             "reply_to_message": Message(
                 message_id=int(inner.seq or 0),
@@ -212,14 +224,14 @@ def to_update(raw: dict[str, Any], update_id: int) -> Update | None:
         )
         return None
 
-    if event.update_type == "message_created":
+    if event.update_type == UpdateType.MESSAGE_CREATED:
         if event.message is None:
             # MAX умеет прислать message_created без самого сообщения.
             logger.debug("MAX message_created без сообщения, пропускаем")
             return None
         return Update(update_id=update_id, message=to_message(event.message))
 
-    if event.update_type == "message_callback":
+    if event.update_type == UpdateType.MESSAGE_CALLBACK:
         callback = event.callback
         clicker = to_user(callback.user) if callback else None
         if callback is None or callback.callback_id is None or clicker is None:
@@ -240,7 +252,7 @@ def to_update(raw: dict[str, Any], update_id: int) -> Update | None:
             ),
         )
 
-    if event.update_type == "bot_started":
+    if event.update_type == UpdateType.BOT_STARTED:
         # Нажатие «Начать» в MAX — ближайший аналог /start в Telegram.
         return Update(
             update_id=update_id,
@@ -316,14 +328,13 @@ def keyboard_to_attachment(
 
 
 # MAX-тип чата → телеграмный. «dialog» — личка, «chat» — группа.
-_CHAT_TYPES = {"dialog": "private", "chat": "group", "channel": "channel"}
 
 
 def to_chat_full_info(raw: dict[str, Any]) -> ChatFullInfo:
     """MAX chat → aiogram ChatFullInfo (её возвращает getChat)."""
     return ChatFullInfo(
         id=raw["chat_id"],
-        type=_CHAT_TYPES.get(str(raw.get("type")), "group"),
+        type=chat_type(raw.get("type")),
         title=raw.get("title"),
         description=raw.get("description"),
         invite_link=raw.get("link"),

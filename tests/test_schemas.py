@@ -89,3 +89,38 @@ def test_message_without_body_still_parses() -> None:
     assert update is not None
     assert update.message is not None
     assert update.message.text is None
+
+
+def test_protocol_words_live_in_one_place() -> None:
+    """Слова протокола — константы, а не строки по коду.
+
+    Опечатка в строке «message_created» не ошибка для интерпретатора: ветка
+    просто перестаёт срабатывать, и событие тихо пропадает. С константой то
+    же место падает на импорте.
+    """
+    from aiogram_max.schemas import AttachmentType, ChatType, LinkType, UpdateType
+
+    assert UpdateType.MESSAGE_CREATED == "message_created"
+    assert UpdateType.MESSAGE_CALLBACK == "message_callback"
+    assert UpdateType.BOT_STARTED == "bot_started"
+    assert LinkType.FORWARD == "forward"
+    assert LinkType.REPLY == "reply"
+    assert AttachmentType.IMAGE == "image"
+    assert ChatType.DIALOG == "dialog"
+
+
+def test_update_types_cover_what_converter_handles() -> None:
+    """Каждый разбираемый вид события назван в UpdateType.
+
+    Проверка от обратного: если в конвертере появится ветка на строке, а не
+    на константе, сюда её никто не добавит — и это будет видно.
+    """
+    import inspect
+
+    from aiogram_max import converters
+    from aiogram_max.schemas import UpdateType
+
+    source = inspect.getsource(converters.to_update)
+    for kind in UpdateType:
+        assert f"UpdateType.{kind.name}" in source, f"{kind} не разбирается"
+    assert '"message_' not in source, "вид события сравнивается строкой, а не константой"

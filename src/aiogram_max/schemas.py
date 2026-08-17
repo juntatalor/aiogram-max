@@ -20,7 +20,43 @@
 нашли его только тогда, когда понадобилась пересылка.
 """
 
+from enum import StrEnum
+
 from pydantic import BaseModel, ConfigDict, Field
+
+
+class UpdateType(StrEnum):
+    """Виды событий MAX, которые библиотека умеет переводить."""
+
+    MESSAGE_CREATED = "message_created"
+    MESSAGE_CALLBACK = "message_callback"
+    # Нажатие «Начать» — ближайший аналог /start в Telegram.
+    BOT_STARTED = "bot_started"
+
+
+class LinkType(StrEnum):
+    """Вид связи с другим сообщением."""
+
+    FORWARD = "forward"
+    REPLY = "reply"
+
+
+class AttachmentType(StrEnum):
+    """Виды вложений, которые встречались живьём."""
+
+    IMAGE = "image"
+    FILE = "file"
+    AUDIO = "audio"
+    VIDEO = "video"
+    INLINE_KEYBOARD = "inline_keyboard"
+
+
+class ChatType(StrEnum):
+    """Где идёт разговор. В Telegram это private / group / channel."""
+
+    DIALOG = "dialog"
+    CHAT = "chat"
+    CHANNEL = "channel"
 
 
 class MaxModel(BaseModel):
