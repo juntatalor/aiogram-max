@@ -91,5 +91,105 @@
     "timestamp": 1785182382767,
     "user_locale": "ru",
     "update_type": "message_callback"
+  },
+  "message_forwarded": {
+    "update_type": "message_created",
+    "timestamp": 1785182382767,
+    "message": {
+      "recipient": {
+        "chat_id": 472107880,
+        "chat_type": "dialog",
+        "user_id": 277639678
+      },
+      "timestamp": 1785182382767,
+      "body": {
+        "mid": "mid.outer-forward-1",
+        "seq": 117111855275929398,
+        "text": ""
+      },
+      "sender": {
+        "user_id": 212843158,
+        "first_name": "Мария",
+        "last_name": "Иванова",
+        "is_bot": false,
+        "last_activity_time": 1785182382767,
+        "name": "Мария Иванова"
+      },
+      "link": {
+        "type": "forward",
+        "message": {
+          "mid": "mid.forward-live-1",
+          "seq": 117093366898295643,
+          "text": "Не планировала, если это не обязательно"
+        },
+        "sender": {
+          "user_id": 212843158,
+          "first_name": "Мария",
+          "last_name": "Иванова",
+          "is_bot": false,
+          "last_activity_time": 1785182382767,
+          "name": "Мария Иванова"
+        },
+        "chat_id": 0
+      }
+    }
+  },
+  "message_reply": {
+    "update_type": "message_created",
+    "timestamp": 1785182382767,
+    "message": {
+      "recipient": {
+        "chat_id": 472107880,
+        "chat_type": "dialog",
+        "user_id": 277639678
+      },
+      "timestamp": 1785182382767,
+      "body": {
+        "mid": "mid.outer-reply-1",
+        "seq": 117111856135171330,
+        "text": "Ответ на сообщение"
+      },
+      "sender": {
+        "user_id": 212843158,
+        "first_name": "Мария",
+        "last_name": "Иванова",
+        "is_bot": false,
+        "last_activity_time": 1785182382767,
+        "name": "Мария Иванова"
+      },
+      "link": {
+        "type": "reply",
+        "message": {
+          "mid": "mid.reply-target-1",
+          "seq": 117093366898295000,
+          "text": "Вот ваш пост! Хотите внести какие-то правки?",
+          "attachments": [
+            {
+              "payload": {
+                "buttons": [
+                  [
+                    {
+                      "payload": "accept:517",
+                      "text": "✅ Принять пост",
+                      "type": "callback"
+                    }
+                  ]
+                ]
+              },
+              "type": "inline_keyboard"
+            }
+          ]
+        },
+        "sender": {
+          "user_id": 277639678,
+          "first_name": "Почерк",
+          "username": "example_bot",
+          "is_bot": true,
+          "last_activity_time": 1785182382767,
+          "name": "Почерк"
+        },
+        "chat_id": 392464188
+      }
+    }
   }
 }

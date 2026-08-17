@@ -76,7 +76,9 @@ aiogram-`Update`.
 | Родной `Dispatcher.start_polling` | `test_native_polling_loop_delivers_max_events` |
 | Правка сообщения (`seq` ↔ `mid`) | `test_edit_message_uses_max_mid` |
 | Неподдерживаемый метод | `test_unsupported_method_raises_in_strict_mode` |
-| Живые payload'ы MAX | `tests/test_live_fixtures.py` (6 тестов на снятых с API событиях) |
+| Живые payload'ы MAX | `tests/test_live_fixtures.py` (9 тестов на снятых с API событиях) |
+| Пересланное сообщение → `forward_origin` | `test_live_forward_keeps_text_and_author` |
+| Ответ на сообщение → `reply_to_message` | `test_live_reply_keeps_quoted_message` |
 | Потеря кнопки без аналога | `test_dropped_button_warns_but_keeps_the_rest` |
 | Маппинг parse_mode / notify / reply | `test_supported_params_are_mapped_not_dropped` |
 | Вложения: загрузка и отправка | `test_send_photo_uploads_and_attaches_token` |
@@ -114,6 +116,20 @@ make_bot(token, unsupported=UnsupportedPolicy.STRICT)
 | `entities=[...]` | конвертация в html, см. «Разметка» |
 | `disable_notification=True` | `notify: false` |
 | `reply_to_message_id` | `link: {type: reply, mid}` |
+
+Обратный перевод, из MAX в aiogram, разбирает то же поле `link`:
+
+| MAX | aiogram |
+| --- | --- |
+| `link: {type: forward, sender, message}` | `forward_origin` (`MessageOriginUser`), текст из `link.message.text` |
+| `link: {type: reply, sender, message}` | `reply_to_message` |
+
+У пересланного сообщения внешний `body.text` приходит **пустым** — текст
+лежит только внутри `link.message.text`. До версии 1.2.0 библиотека читала
+внешний текст, и форвард превращался в сообщение без текста: бот на другой
+стороне не видел ни текста, ни признака пересылки и обычно не отвечал вовсе.
+Форма объекта снята с живого API 2026-08-17: в документации MAX страница
+`LinkedMessage` отдаёт 404.
 
 Отдельный случай — пустой `callback.answer()`. В Telegram он снимает
 индикатор загрузки на кнопке и стоит почти в каждом хендлере; у MAX такой
