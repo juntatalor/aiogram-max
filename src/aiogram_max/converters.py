@@ -3,17 +3,12 @@
 Это единственное место, где живут знания о форме payload'ов MAX. Всё
 остальное работает в терминах aiogram-типов.
 
-Схемы MAX сверены с моделями библиотеки maxapi 1.2.1:
-* update: {update_type, timestamp, ...}
-* message: {sender: User, recipient: {user_id, chat_id, chat_type},
-            timestamp, body: {mid, seq, text, attachments}, link?: LinkedMessage}
-* link: {type: forward|reply, sender: User, chat_id: int,
-         message: {mid, seq, text, attachments}} — снято с живого MAX
-         2026-08-17, в документации объект не расписан
-* user: {user_id, first_name, last_name, username, is_bot}
-* callback: {timestamp, callback_id, payload, user}
+Форма событий MAX описана моделями в ``schemas.py`` — там же объяснено,
+почему они принимают всё подряд. Здесь остаётся только перевод: из модели
+MAX в тип aiogram.
 """
 
+import logging
 from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
@@ -36,6 +31,19 @@ from aiogram.types import (
     Update,
     User,
 )
+from pydantic import ValidationError
+
+from aiogram_max.schemas import (
+    MaxAttachment,
+    MaxBody,
+    MaxLink,
+    MaxMessage,
+    MaxRecipient,
+    MaxUpdate,
+    MaxUser,
+)
+
+logger = logging.getLogger(__name__)
 
 # MAX различает диалог с ботом и групповой чат; Telegram — private/group/channel.
 _CHAT_TYPE = {"dialog": "private", "chat": "group", "channel": "channel"}
@@ -45,21 +53,26 @@ def chat_type(max_type: str | None) -> str:
     return _CHAT_TYPE.get(max_type or "dialog", "private")
 
 
-def to_user(raw: dict[str, Any] | None) -> User | None:
-    """MAX user → aiogram User."""
-    if not raw:
+def to_user(raw: dict[str, Any] | MaxUser | None) -> User | None:
+    """MAX user → aiogram User. None — человека в событии нет.
+
+    Словарь на входе принимается ради вызывающих снаружи: сессия зовёт это
+    на ответе ``GET /me``, где модели события нет.
+    """
+    user = MaxUser.model_validate(raw) if isinstance(raw, dict) else raw
+    if user is None or user.user_id is None:
         return None
     return User(
-        id=raw["user_id"],
-        is_bot=bool(raw.get("is_bot", False)),
+        id=user.user_id,
+        is_bot=user.is_bot,
         # first_name в Telegram обязателен, в MAX может не прийти.
-        first_name=raw.get("first_name") or raw.get("name") or "MAX user",
-        last_name=raw.get("last_name"),
-        username=raw.get("username"),
+        first_name=user.first_name or user.name or "MAX user",
+        last_name=user.last_name,
+        username=user.username,
     )
 
 
-def to_chat(recipient: dict[str, Any], sender: dict[str, Any] | None) -> Chat:
+def to_chat(recipient: MaxRecipient | None, sender: MaxUser | None) -> Chat:
     """MAX recipient → aiogram Chat.
 
     ``recipient.user_id`` в запасной путь НЕ годится: на живых событиях видно,
@@ -68,15 +81,14 @@ def to_chat(recipient: dict[str, Any], sender: dict[str, Any] | None) -> Chat:
     подставить его как chat_id, бот в какой-то момент начнёт отвечать сам
     себе, причём молча. Поэтому запасной путь только через отправителя.
     """
-    cid = recipient.get("chat_id")
-    if cid is None and sender and not sender.get("is_bot"):
-        cid = sender.get("user_id")
-    return Chat(id=int(cid or 0), type=chat_type(recipient.get("chat_type")))
+    recipient = recipient or MaxRecipient()
+    cid = recipient.chat_id
+    if cid is None and sender is not None and not sender.is_bot:
+        cid = sender.user_id
+    return Chat(id=int(cid or 0), type=chat_type(recipient.chat_type))
 
 
-def to_attachments(
-    raw_attachments: list[dict[str, Any]] | None,
-) -> dict[str, Any]:
+def to_attachments(attachments: list[MaxAttachment] | None) -> dict[str, Any]:
     """MAX attachments → поля aiogram Message (document / photo).
 
     У MAX нет file_id и метода getFile: вложение приходит готовым URL внутри
@@ -84,27 +96,25 @@ def to_attachments(
     ``file_path``, и ``bot.download`` скачивает по прямой ссылке.
     """
     fields: dict[str, Any] = {}
-    for att in raw_attachments or []:
-        payload = att.get("payload") or {}
-        url = payload.get("url")
+    for att in attachments or []:
+        url = att.payload.url if att.payload else None
         if not url:
             continue
-        kind = att.get("type")
-        if kind == "image" and "photo" not in fields:
+        if att.type == "image" and "photo" not in fields:
             fields["photo"] = [
                 PhotoSize(file_id=url, file_unique_id=url, width=0, height=0)
             ]
-        elif kind in {"file", "audio", "video"} and "document" not in fields:
+        elif att.type in {"file", "audio", "video"} and "document" not in fields:
             fields["document"] = Document(
                 file_id=url,
                 file_unique_id=url,
-                file_name=att.get("filename"),
-                file_size=att.get("size"),
+                file_name=att.filename,
+                file_size=att.size,
             )
     return fields
 
 
-def to_linked(link: dict[str, Any] | None, chat: Chat, date: datetime) -> dict[str, Any]:
+def to_linked(link: MaxLink | None, chat: Chat, date: datetime) -> dict[str, Any]:
     """MAX ``message.link`` → поля aiogram про пересылку и ответ.
 
     MAX кладёт в одно поле два разных случая, различая их по ``type``:
@@ -121,20 +131,12 @@ def to_linked(link: dict[str, Any] | None, chat: Chat, date: datetime) -> dict[s
     вовсе, но на этот случай есть ``MessageOriginHiddenUser``: без него
     событие без ``sender`` уронило бы разбор.
     """
-    if not link:
+    if link is None:
         return {}
-    inner = link.get("message") or {}
-    author = to_user(link.get("sender"))
-    quoted = Message(
-        message_id=int(inner.get("seq") or 0),
-        date=date,
-        chat=chat,
-        from_user=author,
-        text=inner.get("text"),
-        **to_attachments(inner.get("attachments")),
-    )
+    inner = link.message or MaxBody()
+    author = to_user(link.sender)
 
-    if link.get("type") == "forward":
+    if link.type == "forward":
         origin = (
             MessageOriginUser(type=MessageOriginType.USER, date=date, sender_user=author)
             if author is not None
@@ -144,89 +146,109 @@ def to_linked(link: dict[str, Any] | None, chat: Chat, date: datetime) -> dict[s
                 sender_user_name="MAX user",
             )
         )
-        return {"forward_origin": origin, "forward_text": inner.get("text")}
-    if link.get("type") == "reply":
-        return {"reply_to_message": quoted}
-    # Неизвестный вид связи: молча терять нельзя, но и падать не на чем —
+        return {"forward_origin": origin, "forward_text": inner.text}
+    if link.type == "reply":
+        return {
+            "reply_to_message": Message(
+                message_id=int(inner.seq or 0),
+                date=date,
+                chat=chat,
+                from_user=author,
+                text=inner.text,
+                **to_attachments(inner.attachments),
+            )
+        }
+    # Незнакомый вид связи: молча терять нельзя, но и падать не на чем —
     # отдаём пустое, сообщение доедет как обычное.
+    logger.debug("MAX link неизвестного вида: %s", link.type)
     return {}
 
 
-def to_message(raw: dict[str, Any]) -> Message:
+def to_message(raw: dict[str, Any] | MaxMessage) -> Message:
     """MAX message → aiogram Message.
 
     ``message_id`` берём из body.seq: он целочисленный и монотонный внутри
     чата, тогда как MAX-идентификатор ``mid`` — строка. Соответствие
     seq → mid держит сессия, оно нужно для правки и удаления.
     """
-    body = raw.get("body") or {}
-    sender = raw.get("sender")
-    recipient = raw.get("recipient") or {}
-    chat = to_chat(recipient, sender)
-    date = datetime.fromtimestamp(int(raw.get("timestamp", 0)) / 1000, tz=UTC)
+    message = MaxMessage.model_validate(raw) if isinstance(raw, dict) else raw
+    body = message.body or MaxBody()
+    chat = to_chat(message.recipient, message.sender)
+    date = datetime.fromtimestamp(int(message.timestamp or 0) / 1000, tz=UTC)
 
-    linked = to_linked(raw.get("link"), chat, date)
+    linked = to_linked(message.link, chat, date)
     # У пересланного сообщения текст только внутри link — снаружи пустая
     # строка, и она обязана уступить.
     forwarded_text = linked.pop("forward_text", None)
-    text = body.get("text") or forwarded_text
 
     return Message(
-        message_id=int(body.get("seq") or 0),
+        message_id=int(body.seq or 0),
         date=date,
         chat=chat,
-        from_user=to_user(sender),
-        text=text,
-        **to_attachments(body.get("attachments")),
+        from_user=to_user(message.sender),
+        text=body.text or forwarded_text,
+        **to_attachments(body.attachments),
         **linked,
     )
 
 
 def to_update(raw: dict[str, Any], update_id: int) -> Update | None:
-    """MAX update → aiogram Update. None — если тип события нам не нужен."""
-    kind = raw.get("update_type")
+    """MAX update → aiogram Update. None — событие нам не нужно или не разобралось.
 
-    if kind == "message_created":
-        message = raw.get("message")
-        if message is None:
+    Здесь же стоит единственная в библиотеке защита от неожиданного payload:
+    разбор одного события изолирован, и его отказ стоит ровно этого события.
+    Без изоляции падение уронило бы всю пачку ``get_updates``: позиция не
+    сдвинулась бы, та же пачка пришла бы следующим кругом и упала снова —
+    опрос встаёт навсегда, а человек ждёт ответа. Так бот уже молчал сорок
+    пять минут из-за ``message_created`` без тела.
+    """
+    try:
+        event = MaxUpdate.model_validate(raw)
+    except ValidationError as e:
+        logger.warning(
+            "MAX update не разобрался, пропускаем: тип=%s ошибка=%s",
+            raw.get("update_type") if isinstance(raw, dict) else "?",
+            e,
+        )
+        return None
+
+    if event.update_type == "message_created":
+        if event.message is None:
             # MAX умеет прислать message_created без самого сообщения.
-            # Падение здесь роняет весь get_updates, а значит и опрос целиком:
-            # событие лежит в очереди и валит каждый следующий круг, пока
-            # человек ждёт ответа. Пропускаем, как любой неизвестный тип.
+            logger.debug("MAX message_created без сообщения, пропускаем")
             return None
-        return Update(update_id=update_id, message=to_message(message))
+        return Update(update_id=update_id, message=to_message(event.message))
 
-    if kind == "message_callback":
-        cb = raw["callback"]
-        message = raw.get("message")
-        clicker = to_user(cb.get("user"))
-        if clicker is None:
-            # Кто нажал — обязательное поле CallbackQuery в aiogram, и без него
-            # событие всё равно некуда роутить. Пропускаем как неизвестный тип,
-            # а не падаем: иначе один кривой апдейт застопорит весь polling.
+    if event.update_type == "message_callback":
+        callback = event.callback
+        clicker = to_user(callback.user) if callback else None
+        if callback is None or callback.callback_id is None or clicker is None:
+            # Кто нажал и id нажатия — обязательные поля CallbackQuery в
+            # aiogram, и без них событие всё равно некуда роутить.
+            logger.debug("MAX callback без нажавшего или без id, пропускаем")
             return None
         return Update(
             update_id=update_id,
             callback_query=CallbackQuery(
-                id=cb["callback_id"],
+                id=callback.callback_id,
                 from_user=clicker,
                 # chat_instance в Telegram обязателен и используется только
                 # как ключ группировки; MAX аналога не имеет.
-                chat_instance=str(cb.get("callback_id")),
-                data=cb.get("payload"),
-                message=to_message(message) if message else None,
+                chat_instance=callback.callback_id,
+                data=callback.payload,
+                message=to_message(event.message) if event.message else None,
             ),
         )
 
-    if kind == "bot_started":
+    if event.update_type == "bot_started":
         # Нажатие «Начать» в MAX — ближайший аналог /start в Telegram.
         return Update(
             update_id=update_id,
             message=Message(
                 message_id=0,
-                date=datetime.fromtimestamp(int(raw.get("timestamp", 0)) / 1000, tz=UTC),
-                chat=Chat(id=int(raw.get("chat_id") or 0), type="private"),
-                from_user=to_user(raw.get("user")),
+                date=datetime.fromtimestamp(int(event.timestamp or 0) / 1000, tz=UTC),
+                chat=Chat(id=int(event.chat_id or 0), type="private"),
+                from_user=to_user(event.user),
                 text="/start",
             ),
         )
