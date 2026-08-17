@@ -9,6 +9,8 @@
 import json
 import pathlib
 
+from aiogram.types import MessageOriginUser
+
 from aiogram_max import converters
 
 FIXTURES = json.loads(
@@ -115,3 +117,52 @@ def test_message_created_without_body_does_not_crash() -> None:
     }
 
     assert converters.to_update(raw, 1) is None
+
+
+def test_live_forward_keeps_text_and_author() -> None:
+    """Пересланное сообщение: текст лежит внутри link, снаружи пусто.
+
+    Так MAX и присылает форвард: ``body.text`` пустая строка, сам текст —
+    в ``link.message.text``. Пока мы читали только внешний текст, событие
+    выглядело сообщением ни о чём: у бота на другой стороне не было ни
+    текста, ни признака пересылки, и человек не получал ответа вовсе.
+    """
+    update = converters.to_update(FIXTURES["message_forwarded"], 1)
+
+    assert update is not None
+    message = update.message
+    assert message is not None
+    assert message.text == "Не планировала, если это не обязательно"
+
+    origin = message.forward_origin
+    assert isinstance(origin, MessageOriginUser)
+    assert origin.sender_user is not None
+    assert origin.sender_user.first_name == "Мария"
+    assert origin.sender_user.last_name == "Иванова"
+
+
+def test_live_reply_keeps_quoted_message() -> None:
+    """Ответ на сообщение: снаружи свой текст, внутри — тот, на который отвечают."""
+    update = converters.to_update(FIXTURES["message_reply"], 1)
+
+    assert update is not None
+    message = update.message
+    assert message is not None
+    assert message.text == "Ответ на сообщение"
+
+    quoted = message.reply_to_message
+    assert quoted is not None
+    assert quoted.text == "Вот ваш пост! Хотите внести какие-то правки?"
+    assert quoted.from_user is not None
+    assert quoted.from_user.is_bot is True
+    assert message.forward_origin is None, "ответ — не пересылка"
+
+
+def test_live_message_without_link_is_untouched() -> None:
+    """Обычное сообщение остаётся прежним: ни пересылки, ни цитаты."""
+    update = converters.to_update(FIXTURES["message_created"], 1)
+
+    assert update is not None
+    assert update.message is not None
+    assert update.message.forward_origin is None
+    assert update.message.reply_to_message is None

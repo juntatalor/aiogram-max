@@ -6,7 +6,10 @@
 Схемы MAX сверены с моделями библиотеки maxapi 1.2.1:
 * update: {update_type, timestamp, ...}
 * message: {sender: User, recipient: {user_id, chat_id, chat_type},
-            timestamp, body: {mid, seq, text, attachments}}
+            timestamp, body: {mid, seq, text, attachments}, link?: LinkedMessage}
+* link: {type: forward|reply, sender: User, chat_id: int,
+         message: {mid, seq, text, attachments}} — снято с живого MAX
+         2026-08-17, в документации объект не расписан
 * user: {user_id, first_name, last_name, username, is_bot}
 * callback: {timestamp, callback_id, payload, user}
 """
@@ -15,6 +18,7 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
 
+from aiogram.enums import MessageOriginType
 from aiogram.types import (
     AcceptedGiftTypes,
     CallbackQuery,
@@ -26,6 +30,8 @@ from aiogram.types import (
     Document,
     InlineKeyboardMarkup,
     Message,
+    MessageOriginHiddenUser,
+    MessageOriginUser,
     PhotoSize,
     Update,
     User,
@@ -98,6 +104,54 @@ def to_attachments(
     return fields
 
 
+def to_linked(link: dict[str, Any] | None, chat: Chat, date: datetime) -> dict[str, Any]:
+    """MAX ``message.link`` → поля aiogram про пересылку и ответ.
+
+    MAX кладёт в одно поле два разных случая, различая их по ``type``:
+
+    * ``forward`` — пересланное сообщение. Внешний ``body.text`` при этом
+      **пустой**, сам текст лежит в ``link.message.text``. Читая только
+      внешний текст, мы получали сообщение ни о чём: ни текста, ни признака
+      пересылки, и бот на другой стороне человеку не отвечал.
+    * ``reply`` — ответ на сообщение. Внешний текст свой, а в ``link``
+      лежит то, на что отвечают.
+
+    Автор оригинала приходит в ``link.sender`` — в Telegram это
+    ``forward_origin.sender_user``. Скрытого отправителя MAX не присылает
+    вовсе, но на этот случай есть ``MessageOriginHiddenUser``: без него
+    событие без ``sender`` уронило бы разбор.
+    """
+    if not link:
+        return {}
+    inner = link.get("message") or {}
+    author = to_user(link.get("sender"))
+    quoted = Message(
+        message_id=int(inner.get("seq") or 0),
+        date=date,
+        chat=chat,
+        from_user=author,
+        text=inner.get("text"),
+        **to_attachments(inner.get("attachments")),
+    )
+
+    if link.get("type") == "forward":
+        origin = (
+            MessageOriginUser(type=MessageOriginType.USER, date=date, sender_user=author)
+            if author is not None
+            else MessageOriginHiddenUser(
+                type=MessageOriginType.HIDDEN_USER,
+                date=date,
+                sender_user_name="MAX user",
+            )
+        )
+        return {"forward_origin": origin, "forward_text": inner.get("text")}
+    if link.get("type") == "reply":
+        return {"reply_to_message": quoted}
+    # Неизвестный вид связи: молча терять нельзя, но и падать не на чем —
+    # отдаём пустое, сообщение доедет как обычное.
+    return {}
+
+
 def to_message(raw: dict[str, Any]) -> Message:
     """MAX message → aiogram Message.
 
@@ -108,13 +162,23 @@ def to_message(raw: dict[str, Any]) -> Message:
     body = raw.get("body") or {}
     sender = raw.get("sender")
     recipient = raw.get("recipient") or {}
+    chat = to_chat(recipient, sender)
+    date = datetime.fromtimestamp(int(raw.get("timestamp", 0)) / 1000, tz=UTC)
+
+    linked = to_linked(raw.get("link"), chat, date)
+    # У пересланного сообщения текст только внутри link — снаружи пустая
+    # строка, и она обязана уступить.
+    forwarded_text = linked.pop("forward_text", None)
+    text = body.get("text") or forwarded_text
+
     return Message(
         message_id=int(body.get("seq") or 0),
-        date=datetime.fromtimestamp(int(raw.get("timestamp", 0)) / 1000, tz=UTC),
-        chat=to_chat(recipient, sender),
+        date=date,
+        chat=chat,
         from_user=to_user(sender),
-        text=body.get("text"),
+        text=text,
         **to_attachments(body.get("attachments")),
+        **linked,
     )
 
 
