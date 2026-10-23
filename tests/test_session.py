@@ -64,6 +64,18 @@ MESSAGE_CALLBACK = {
 }
 
 
+BOT_STARTED = {
+    "update_type": "bot_started",
+    "timestamp": 1769500002000,
+    "chat_id": 42,
+    "user": {"user_id": 777, "first_name": "Сергей", "is_bot": False},
+    "user_locale": "ru",
+}
+
+# Тот же вход, но по диплинку: https://max.ru/<бот>?start=t7k3f9zqm
+BOT_STARTED_WITH_PAYLOAD = {**BOT_STARTED, "payload": "t7k3f9zqm"}
+
+
 class FakeMax:
     """Мини-сервер MAX: отдаёт заготовленные события, пишет запросы."""
 
@@ -848,3 +860,35 @@ async def test_edit_media_uploads_new_file() -> None:
         "text": "стала зелёной",
     }
     await bot.session.close()
+
+
+async def test_bot_started_becomes_start_command() -> None:
+    """Нажатие «Начать» — это /start, как в Telegram."""
+    fake = FakeMax([BOT_STARTED])
+    bot = make_test_bot(fake)
+
+    updates = await bot.get_updates()
+
+    assert len(updates) == 1
+    message = updates[0].message
+    assert message is not None
+    assert message.text == "/start"
+    assert message.chat.id == 42
+    assert message.chat.type == "private"
+
+
+async def test_deeplink_payload_arrives_as_command_tail() -> None:
+    """Метка из ?start= приезжает хвостом команды, как её отдаёт Telegram.
+
+    Так обработчику бота не нужно знать, с какой он площадки: и там, и
+    здесь метка лежит в message.text после пробела. Без этого payload
+    терялся вовсе, и диплинк в MAX выглядел как неработающий.
+    """
+    fake = FakeMax([BOT_STARTED_WITH_PAYLOAD])
+    bot = make_test_bot(fake)
+
+    updates = await bot.get_updates()
+
+    message = updates[0].message
+    assert message is not None
+    assert message.text == "/start t7k3f9zqm"
