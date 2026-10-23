@@ -220,6 +220,16 @@ def to_update(raw: dict[str, Any], update_id: int) -> Update | None:
 
     if kind == "bot_started":
         # Нажатие «Начать» в MAX — ближайший аналог /start в Telegram.
+        #
+        # Диплинк вида https://max.ru/<бот>?start=<метка> приносит метку в
+        # поле payload (до 128 символов). Складываем её в текст хвостом
+        # команды — ровно так её отдаёт Telegram («/start <метка>»), и
+        # обработчику бота не приходится знать, с какой он площадки. Без
+        # этого метка не доезжала вовсе: payload тут не читался, и весь
+        # смысл диплинка — привязка аккаунта, реферальные ссылки, метки
+        # источника — пропадал молча, выглядя как «в MAX такого нет».
+        payload = raw.get("payload")
+        text = f"/start {payload}" if payload else "/start"
         return Update(
             update_id=update_id,
             message=Message(
@@ -227,7 +237,7 @@ def to_update(raw: dict[str, Any], update_id: int) -> Update | None:
                 date=datetime.fromtimestamp(int(raw.get("timestamp", 0)) / 1000, tz=UTC),
                 chat=Chat(id=int(raw.get("chat_id") or 0), type="private"),
                 from_user=to_user(raw.get("user")),
-                text="/start",
+                text=text,
             ),
         )
 

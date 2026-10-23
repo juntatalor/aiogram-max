@@ -76,6 +76,7 @@ aiogram-`Update`.
 | Родной `Dispatcher.start_polling` | `test_native_polling_loop_delivers_max_events` |
 | Правка сообщения (`seq` ↔ `mid`) | `test_edit_message_uses_max_mid` |
 | Неподдерживаемый метод | `test_unsupported_method_raises_in_strict_mode` |
+| Метка диплинка (`?start=`) → хвост команды | `test_deeplink_payload_arrives_as_command_tail` |
 | Живые payload'ы MAX | `tests/test_live_fixtures.py` (9 тестов на снятых с API событиях) |
 | Пересланное сообщение → `forward_origin` | `test_live_forward_keeps_text_and_author` |
 | Ответ на сообщение → `reply_to_message` | `test_live_reply_keeps_quoted_message` |
@@ -86,6 +87,35 @@ aiogram-`Update`.
 | MarkdownV2 → html (включая подчёркивание) | `tests/test_markup.py`, 11 тестов |
 | `entities` → html без потерь | `test_entities_are_no_longer_dropped_silently` |
 | `MarkupPolicy.RAW` не трогает текст | `test_raw_policy_leaves_text_alone` |
+
+## Диплинки: метка в ссылке на бота
+
+Чтобы передать боту данные при запуске, добавьте к ссылке параметр `start`:
+
+```
+https://max.ru/<имя_бота>?start=<метка>
+```
+
+Метка (до 128 символов) приезжает в поле `payload` события `bot_started`, а
+библиотека кладёт её хвостом команды — ровно так, как отдаёт Telegram:
+
+```python
+@router.message(Command("start"))
+async def on_start(message: Message, command: CommandObject) -> None:
+    tag = command.args  # «t7k3f9zqm» для ?start=t7k3f9zqm, None без метки
+```
+
+То есть обработчику не нужно знать, с какой он площадки: и в Telegram, и в
+MAX метка лежит в `message.text` после пробела.
+
+Зачем это нужно: привязка бота к аккаунту внешнего сервиса одним нажатием,
+реферальные ссылки, метки рекламного источника. В документации MAX поле
+`payload` описано, а вот то, что заполняется он параметром `start`, —
+нет; отсюда и распространённое «в MAX такого нет».
+
+Требования к приложению MAX: iOS 2.7.0+, Android 2.9.0+. На старых версиях
+метка не придёт, и `bot_started` приедет без `payload` — обработчик обязан
+это переживать.
 
 ## Неподдерживаемое в MAX
 
@@ -203,7 +233,9 @@ CommonMark, а в CommonMark `__текст__` — это жирный. В Markdo
   В `int64` влезает и aiogram переваривает, но узкое поле БД (`integer`
   вместо `bigint`) на этом сломается.
 * **`/start` приходит обычным `message_created`**, а не отдельным событием —
-  фильтр `Command` работает без спецобработки.
+  фильтр `Command` работает без спецобработки. Нажатие «Начать» и переход по
+  диплинку — другое событие, `bot_started`; библиотека приводит и его к
+  `/start`, вместе с меткой из `payload` (см. «Диплинки»).
 * **Идентификатор сообщения двойной**: aiogram знает `message_id` (int из
   `seq`), MAX правит и удаляет по строковому `mid`. Соответствие держит
   сессия в памяти (последние 10 000 сообщений), поэтому правка переживает
