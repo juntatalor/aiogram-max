@@ -19,6 +19,7 @@ from aiogram_max.errors import (
 from aiogram_max.markup import MarkupPolicy
 from aiogram_max.session import (
     MAX_API_URL,
+    MAX_API_URL_V2,
     NOT_IMPLEMENTED_PR_WELCOME,
     MaxSession,
     UnsupportedPolicy,
@@ -26,6 +27,7 @@ from aiogram_max.session import (
 
 __all__ = [
     "MAX_API_URL",
+    "MAX_API_URL_V2",
     "NOT_IMPLEMENTED_PR_WELCOME",
     "AiogramMaxError",
     "MarkupPolicy",
