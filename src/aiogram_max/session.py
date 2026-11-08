@@ -74,13 +74,20 @@ from aiogram_max.errors import MaxApiError, NotImplementedYet, UnsupportedByMax
 from aiogram_max.markup import MarkupPolicy, entities_to_html, markdown_to_html
 from aiogram_max.methods import ChatsMixin, MediaMixin, SettingsMixin
 from aiogram_max.mids import MidRegistry
+from aiogram_max.tls import mincifry_context
 
 if TYPE_CHECKING:
     from aiogram import Bot
 
 logger = logging.getLogger(__name__)
 
+# Старый домен. Документация MAX с 19.07.2026 требует новый, но старый
+# продолжает отвечать, и резать его здесь — ломать работающих потребителей
+# без нужды. Переключение — явное (api_url + trust_mincifry), не молчаливое.
 MAX_API_URL = "https://platform-api.max.ru"
+# Новый домен: та же API-логика, но TLS-цепочка заканчивается сертификатом
+# Минцифры — без trust_mincifry соединение падает по TLS (см. aiogram_max.tls).
+MAX_API_URL_V2 = "https://platform-api2.max.ru"
 
 # Телеграмное действие → действие MAX. Список проверен на живом API:
 # всё, чего здесь нет, MAX отвергает как proto.payload.
@@ -132,6 +139,7 @@ class MaxSession(MediaMixin, ChatsMixin, SettingsMixin, BaseSession):
         unsupported: UnsupportedPolicy = UnsupportedPolicy.WARN,
         markup: MarkupPolicy = MarkupPolicy.CONVERT,
         client: httpx.AsyncClient | None = None,
+        trust_mincifry: bool = False,
     ) -> None:
         # file="{path}" — ключевой момент для скачивания вложений. aiogram
         # строит ссылку на файл как api.file_url(token, file_path); у MAX
@@ -143,7 +151,7 @@ class MaxSession(MediaMixin, ChatsMixin, SettingsMixin, BaseSession):
         self._api_url = api_url.rstrip("/")
         self._unsupported = unsupported
         self._markup = markup
-        self._client = client or httpx.AsyncClient(timeout=90.0)
+        self._client = self._make_client(api_url, client, trust_mincifry)
         # Позиция в ленте событий: у MAX это marker, у aiogram — offset.
         # Смысл один и тот же, поэтому значения сшиты (см. _get_updates).
         self._marker: int | None = None
@@ -151,6 +159,39 @@ class MaxSession(MediaMixin, ChatsMixin, SettingsMixin, BaseSession):
         # aiogram знает сообщение по seq, MAX правит и удаляет по mid.
         # Реестр ограничен по размеру, см. mids.py.
         self._mids = MidRegistry()
+
+    @staticmethod
+    def _make_client(
+        api_url: str, client: httpx.AsyncClient | None, trust_mincifry: bool
+    ) -> httpx.AsyncClient:
+        """Собрать HTTP-клиент сессии с учётом флага Минцифры.
+
+        Свой клиент всегда важнее флага: TLS чужого клиента не перекраиваем —
+        потребитель мог собрать его под свою инфраструктуру (прокси, pinning,
+        mTLS), и молчаливая замена контекста ломала бы её незаметно. Но и
+        молчать о проигнорированном флаге нельзя: человек включил его не для
+        украшения — сейчас соединение упадёт по TLS, и в логе должна быть причина.
+
+        Обратная забывчивость — новый домен без флага — тоже предупреждается:
+        без сертификата Минцифры он не работает в принципе, и предупреждение
+        здесь единственное, что скажет «почему», когда запрос упадёт.
+        """
+        if client is not None:
+            if trust_mincifry:
+                logger.warning(
+                    "trust_mincifry не влияет на переданный client — "
+                    "сертификаты Минцифры загрузите в его SSL-контекст сами"
+                )
+            return client
+        if trust_mincifry:
+            return httpx.AsyncClient(timeout=90.0, verify=mincifry_context())
+        if api_url.rstrip("/") == MAX_API_URL_V2:
+            logger.warning(
+                "api_url указывает на %s без trust_mincifry: без сертификата "
+                "Минцифры соединение упадёт по TLS (см. aiogram_max.tls)",
+                MAX_API_URL_V2,
+            )
+        return httpx.AsyncClient(timeout=90.0)
 
     @property
     def marker(self) -> int | None:
