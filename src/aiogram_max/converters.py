@@ -182,6 +182,19 @@ def to_message(raw: dict[str, Any]) -> Message:
     )
 
 
+# «Тихие» события ухода: их площадка шлёт сама, пользователем они не
+# создаются, но и сообщениями не являются. В диалоге с ботом человек
+# может удалить диалог (dialog_removed) или остановить бота
+# (bot_stopped) — без обработки здесь они пропадали молча.
+_QUIET_TYPES = frozenset({"bot_stopped", "dialog_removed"})
+
+
+def is_quiet(raw: dict[str, Any]) -> bool:
+    """Тихое ли событие ухода: конвертируется в пустой Update, но в
+    dropped_events его тоже стоит записать — там вся полезная нагрузка."""
+    return raw.get("update_type") in _QUIET_TYPES
+
+
 def to_update(raw: dict[str, Any], update_id: int) -> Update | None:
     """MAX update → aiogram Update. None — если тип события нам не нужен."""
     kind = raw.get("update_type")
@@ -217,6 +230,16 @@ def to_update(raw: dict[str, Any], update_id: int) -> Update | None:
                 message=to_message(message) if message else None,
             ),
         )
+
+    if kind in _QUIET_TYPES:
+        # Отписки и уходы: не сообщение и не кнопка, конвертировать не во
+        # что, но и выбрасывать нельзя — потребитель терял их молча и
+        # двигал позицию «прыжком» по подсказке, что не давало даже узнать,
+        # кто ушёл. Пустой Update проходит через потребительский разбор
+        # как kind=unknown: позиция двигается штатно, а в
+        # MaxSession.dropped_events остаётся сырой словарь для тех, кому
+        # уходы важны (аналитика отписок).
+        return Update(update_id=update_id)
 
     if kind == "bot_started":
         # Нажатие «Начать» в MAX — ближайший аналог /start в Telegram.
