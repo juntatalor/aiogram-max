@@ -1,6 +1,5 @@
 """bot_stopped и dialog_removed: позиция двигается, событие не теряется молча."""
 
-
 from aiogram_max.converters import to_update
 
 

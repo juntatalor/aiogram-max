@@ -1,6 +1,5 @@
 """События ниже разбора отдаётся потребителю: MaxSession.dropped_events."""
 
-
 import httpx
 import pytest
 
@@ -11,38 +10,38 @@ from aiogram_max.session import MaxSession
 def _handler(request: httpx.Request) -> httpx.Response:
     """Отдаёт пачку из трёх событий: кнопка и две «тихих» отписки."""
     body = {
-            "updates": [
-                {
-                    "update_type": "message_callback",
-                    "callback": {
-                        "timestamp": 1,
-                        "callback_id": "cb1",
-                        "user": {"user_id": 42, "first_name": "Т"},
-                        "payload": "menu:main",
-                    },
-                    "message": {
-                        "recipient": {"chat_type": "dialog", "chat_id": 100},
-                        "timestamp": 1,
-                        "body": {"mid": "m1", "seq": 1, "text": "текст"},
-                        "sender": {"user_id": 42, "first_name": "Т"},
-                    },
+        "updates": [
+            {
+                "update_type": "message_callback",
+                "callback": {
                     "timestamp": 1,
-                },
-                {
-                    "update_type": "bot_stopped",
-                    "chat_id": 100,
+                    "callback_id": "cb1",
                     "user": {"user_id": 42, "first_name": "Т"},
-                    "timestamp": 2,
+                    "payload": "menu:main",
                 },
-                {
-                    "update_type": "dialog_removed",
-                    "chat_id": 200,
-                    "user": {"user_id": 55},
-                    "timestamp": 3,
+                "message": {
+                    "recipient": {"chat_type": "dialog", "chat_id": 100},
+                    "timestamp": 1,
+                    "body": {"mid": "m1", "seq": 1, "text": "текст"},
+                    "sender": {"user_id": 42, "first_name": "Т"},
                 },
-            ],
-            "marker": 11,
-        }
+                "timestamp": 1,
+            },
+            {
+                "update_type": "bot_stopped",
+                "chat_id": 100,
+                "user": {"user_id": 42, "first_name": "Т"},
+                "timestamp": 2,
+            },
+            {
+                "update_type": "dialog_removed",
+                "chat_id": 200,
+                "user": {"user_id": 55},
+                "timestamp": 3,
+            },
+        ],
+        "marker": 11,
+    }
     return httpx.Response(200, json=body)
 
 
