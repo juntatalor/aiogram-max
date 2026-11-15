@@ -148,9 +148,20 @@ class MaxSession(MediaMixin, ChatsMixin, SettingsMixin, BaseSession):
         # Смысл один и тот же, поэтому значения сшиты (см. _get_updates).
         self._marker: int | None = None
         self._last_update_id = 0
+        # События, отброшенные ниже разбора, — в исходном виде, последней
+        # пачкой. Пустой Update из конвертера двигает позицию, но полезную
+        # нагрузку (кто ушёл, из какого чата) уже не несёт — аналитика
+        # отписок берёт её отсюда. Пачка заменяется целиком при каждом
+        # get_updates, копления нет.
+        self._dropped_events: list[dict[str, Any]] = []
         # aiogram знает сообщение по seq, MAX правит и удаляет по mid.
         # Реестр ограничен по размеру, см. mids.py.
         self._mids = MidRegistry()
+
+    @property
+    def dropped_events(self) -> list[dict[str, Any]]:
+        """Тихие и отброшенные события последней пачки, сырыми словарями."""
+        return list(self._dropped_events)
 
     @property
     def marker(self) -> int | None:
@@ -317,12 +328,23 @@ class MaxSession(MediaMixin, ChatsMixin, SettingsMixin, BaseSession):
 
         base = self._first_id_of_batch(marker, len(raws))
         updates: list[Update] = []
+        # Тихие события новой пачки: заменить прошлые, а не копить.
+        self._dropped_events = []
         for position, raw in enumerate(raws):
             update_id = base + position
             self._last_update_id = update_id
             update = converters.to_update(raw, update_id)
-            if update is None:
+            if update is None or converters.is_quiet(raw):
                 logger.debug("MAX update пропущен: %s", raw.get("update_type"))
+                self._dropped_events.append(
+                    {
+                        "update_type": raw.get("update_type"),
+                        "user_id": (raw.get("user") or {}).get("user_id"),
+                        "chat_id": raw.get("chat_id"),
+                        "timestamp": raw.get("timestamp"),
+                    }
+                )
+            if update is None:
                 continue
             self._remember_mid(raw)
             updates.append(update)
