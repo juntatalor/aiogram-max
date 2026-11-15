@@ -23,6 +23,7 @@ def make_bot(
     unsupported: UnsupportedPolicy = UnsupportedPolicy.WARN,
     markup: MarkupPolicy = MarkupPolicy.CONVERT,
     client: httpx.AsyncClient | None = None,
+    trust_mincifry: bool = False,
     **bot_kwargs: object,
 ) -> Bot:
     """Вернуть обычный ``aiogram.Bot``, ходящий в MAX вместо Telegram.
@@ -33,6 +34,10 @@ def make_bot(
     ``bot_id`` нужен, только если важен ``bot.id`` (мультиботовые сценарии,
     ключи в логах). Не знаете id — берите :func:`create_bot`, он спросит
     его у MAX сам.
+
+    Новый домен MAX (``api_url=MAX_API_URL_V2``) требует
+    ``trust_mincifry=True``: без сертификата Минцифры соединение падает
+    по TLS. Подробности — в модуле :mod:`aiogram_max.tls`.
     """
     session = MaxSession(
         max_token,
@@ -40,6 +45,7 @@ def make_bot(
         unsupported=unsupported,
         markup=markup,
         client=client,
+        trust_mincifry=trust_mincifry,
     )
     return Bot(token=f"{bot_id}:max", session=session, **bot_kwargs)  # type: ignore[arg-type]
 
@@ -51,6 +57,7 @@ async def create_bot(
     unsupported: UnsupportedPolicy = UnsupportedPolicy.WARN,
     markup: MarkupPolicy = MarkupPolicy.CONVERT,
     client: httpx.AsyncClient | None = None,
+    trust_mincifry: bool = False,
     **bot_kwargs: object,
 ) -> Bot:
     """То же, что :func:`make_bot`, но с настоящим ``bot.id`` из ``GET /me``.
@@ -58,7 +65,13 @@ async def create_bot(
     Один лишний запрос на старте — зато ``bot.id`` не ноль, а username
     доезжает до фильтра ``Command``, который разбирает ``/start@bot``.
     """
-    probe = make_bot(max_token, api_url=api_url, unsupported=unsupported, client=client)
+    probe = make_bot(
+        max_token,
+        api_url=api_url,
+        unsupported=unsupported,
+        client=client,
+        trust_mincifry=trust_mincifry,
+    )
     try:
         me = await probe.get_me()
     finally:
@@ -71,5 +84,6 @@ async def create_bot(
         unsupported=unsupported,
         markup=markup,
         client=client,
+        trust_mincifry=trust_mincifry,
         **bot_kwargs,
     )
